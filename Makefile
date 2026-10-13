@@ -1,4 +1,4 @@
-# seigen-spike — スマホ制限アプリの試作（スパイク）。health-sync の Makefile の形に倣う
+# engawa — スマホ制限アプリの試作（スパイク）。health-sync の Makefile の形に倣う
 #
 # よく使うのは:
 #   make resign        generate → build → install（有料チームなので再署名は年1回でよい見込み）
@@ -11,25 +11,25 @@
 #   - `*.xcodeproj` は生成物でコミットしない。各ターゲットの先頭で `xcodegen generate` を走らせる
 #   - `devicectl` でアプリへ引数を渡すときは前に `--` が要る
 #   - `make check` は build/ を壊さないよう build-check/ を使い、終わったら消す
-#   - トークン・鍵は ~/.config/seigen-spike/ に置く（リポジトリ・vault の _memo には置かない）。値は表示しない
+#   - トークン・鍵は ~/.config/engawa/ に置く（リポジトリ・vault の _memo には置かない）。値は表示しない
 
 DEVICE  = 8EAC2623-47F0-58AC-9DEF-8DD9AE4D6E55
-BUNDLE  = jp.kechiiiiin.seigenspike
-PROJECT = seigen-spike.xcodeproj
-SCHEME  = SeigenSpike
-APP     = build/Build/Products/Debug-iphoneos/SeigenSpike.app
-CONF    = $(HOME)/.config/seigen-spike
+BUNDLE  = jp.kechiiiiin.engawa
+PROJECT = engawa.xcodeproj
+SCHEME  = Engawa
+APP     = build/Build/Products/Debug-iphoneos/Engawa.app
+CONF    = $(HOME)/.config/engawa
 
-# 有料チームの Team ID。~/.config/seigen-spike/team-id（1行）か `make build TEAM=XXXXXXXXXX`。
-# xcodegen が project.yml の ${SEIGEN_TEAM_ID} に展開する（push.sh も同じファイルを読む）
+# 有料チームの Team ID。~/.config/engawa/team-id（1行）か `make build TEAM=XXXXXXXXXX`。
+# xcodegen が project.yml の ${ENGAWA_TEAM_ID} に展開する（push.sh も同じファイルを読む）
 TEAM ?= $(shell cat $(CONF)/team-id 2>/dev/null)
-export SEIGEN_TEAM_ID = $(TEAM)
+export ENGAWA_TEAM_ID = $(TEAM)
 TEAM_ARG = $(if $(TEAM),DEVELOPMENT_TEAM=$(TEAM),)
 # PushExt から Family Controls を外して試すとき: make build PUSHEXT_FC_SUFFIX=-noFC
 PUSHEXT_FC_SUFFIX ?=
 FC_ARG = $(if $(PUSHEXT_FC_SUFFIX),PUSHEXT_FC_SUFFIX=$(PUSHEXT_FC_SUFFIX),)
 
-# サーバー。既定は ~/.config/seigen-spike/server-url、ローカル試験は SERVER=http://127.0.0.1:8788
+# サーバー。既定は ~/.config/engawa/server-url、ローカル試験は SERVER=http://127.0.0.1:8788
 SERVER ?= $(shell cat $(CONF)/server-url 2>/dev/null)
 TOKEN_FILE ?= $(CONF)/token
 AUTH = -H "Authorization: Bearer $$(cat $(TOKEN_FILE))"
@@ -84,25 +84,25 @@ launch:
 ## 経路を切り替える（例: make routes R=alertPush）。⚠️ アプリへの引数の前の `--` は必須
 routes:
 	@test -n "$(R)" || { echo "R= を渡すこと（例: make routes R=poll  ／ 全部切るなら R=none）"; exit 1; }
-	xcrun devicectl device process launch --device $(DEVICE) --terminate-existing $(BUNDLE) -- -seigenRoutes "$(R)"
+	xcrun devicectl device process launch --device $(DEVICE) --terminate-existing $(BUNDLE) -- -engawaRoutes "$(R)"
 
 test2:
-	xcrun devicectl device process launch --device $(DEVICE) --terminate-existing $(BUNDLE) -- -seigenRegisterTest2 YES
+	xcrun devicectl device process launch --device $(DEVICE) --terminate-existing $(BUNDLE) -- -engawaRegisterTest2 YES
 
 usage-n:
 	@test -n "$(N)" || { echo "N= を渡すこと（60/120/240）"; exit 1; }
-	xcrun devicectl device process launch --device $(DEVICE) --terminate-existing $(BUNDLE) -- -seigenUsageN "$(N)"
+	xcrun devicectl device process launch --device $(DEVICE) --terminate-existing $(BUNDLE) -- -engawaUsageN "$(N)"
 
 ## トークン（とサーバー URL）をアプリのコンテナ tmp/ に置く。次の起動で App Group へ移してファイルは消える。値は表示しない
 import-token:
 	@test -s $(TOKEN_FILE) || { echo "$(TOKEN_FILE) が無い"; exit 1; }
 	xcrun devicectl device copy to --device $(DEVICE) \
 	  --domain-type appDataContainer --domain-identifier $(BUNDLE) --user mobile \
-	  --source $(TOKEN_FILE) --destination tmp/seigen-import-token
+	  --source $(TOKEN_FILE) --destination tmp/engawa-import-token
 	@if [ -s $(CONF)/server-url ]; then \
 	  xcrun devicectl device copy to --device $(DEVICE) \
 	    --domain-type appDataContainer --domain-identifier $(BUNDLE) --user mobile \
-	    --source $(CONF)/server-url --destination tmp/seigen-import-server; fi
+	    --source $(CONF)/server-url --destination tmp/engawa-import-server; fi
 	@echo "✅ 置いた。iPhone で試作アプリを開く（または make launch）と取り込まれ、ファイルは消える"
 
 check: generate

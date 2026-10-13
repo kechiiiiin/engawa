@@ -3,7 +3,7 @@ import UIKit
 import UserNotifications
 
 @main
-struct SeigenSpikeApp: App {
+struct EngawaApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var model = AppModel()
 
@@ -85,14 +85,14 @@ enum LaunchConfig {
     /// `make import-token` が devicectl でアプリのコンテナ tmp/ に置くファイル。取り込んだら消す
     static func importFiles() {
         let tmp = FileManager.default.temporaryDirectory
-        let tokenFile = tmp.appendingPathComponent("seigen-import-token")
+        let tokenFile = tmp.appendingPathComponent("engawa-import-token")
         if let s = try? String(contentsOf: tokenFile, encoding: .utf8) {
             let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
             if !t.isEmpty { Store.token = t }
             try? FileManager.default.removeItem(at: tokenFile)
             Log.add(kind: "import", ok: !t.isEmpty, detail: "token（値は記録しない）")
         }
-        let serverFile = tmp.appendingPathComponent("seigen-import-server")
+        let serverFile = tmp.appendingPathComponent("engawa-import-server")
         if let s = try? String(contentsOf: serverFile, encoding: .utf8) {
             let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
             if let u = URL(string: t), u.scheme?.hasPrefix("http") == true { Store.serverURL = u }
@@ -101,23 +101,23 @@ enum LaunchConfig {
         }
     }
 
-    /// `-seigenRoutes poll,alertPush`（書いたものだけオン）／`-seigenServer URL`／`-seigenRegisterTest2 YES`
+    /// `-engawaRoutes poll,alertPush`（書いたものだけオン）／`-engawaServer URL`／`-engawaRegisterTest2 YES`
     /// ⚠️ devicectl で渡すときは引数の前に `--`
     static func applyArguments() {
         let ud = UserDefaults.standard
-        if let csv = ud.string(forKey: "seigenRoutes") {
+        if let csv = ud.string(forKey: "engawaRoutes") {
             let r = Routes(csv: csv)
             Store.routes = r
             Log.add(kind: "routes", detail: "起動引数: \(r.summary)")
             Wake.reconcile(r)
         }
-        if let s = ud.string(forKey: "seigenServer"), let u = URL(string: s) {
+        if let s = ud.string(forKey: "engawaServer"), let u = URL(string: s) {
             Store.serverURL = u
         }
-        if ud.bool(forKey: "seigenRegisterTest2") {
+        if ud.bool(forKey: "engawaRegisterTest2") {
             _ = Wake.armTest2()
         }
-        if let n = ud.string(forKey: "seigenUsageN").flatMap(Int.init) {
+        if let n = ud.string(forKey: "engawaUsageN").flatMap(Int.init) {
             Store.usageN = n
             if Store.routes.usageWake { Wake.armUsage(n: n) }
         }

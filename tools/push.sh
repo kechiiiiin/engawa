@@ -4,11 +4,11 @@
 #   tools/push.sh alert     # mutable-content の通知 → PushExt（NSE）が state を反映
 #   tools/push.sh silent    # content-available → 本体が背景で起きて GET /state（終了状態では起きない・公式）
 #
-# 鍵などは環境変数か ~/.config/seigen-spike/ から読む（鍵の中身・JWT・トークンは出力しない）:
-#   APNS_KEY_PATH  既定: ~/.config/seigen-spike/AuthKey_*.p8 の最初の1つ
-#   APNS_KEY_ID    既定: ~/.config/seigen-spike/key-id、無ければファイル名 AuthKey_<KEYID>.p8 から
-#   APNS_TEAM_ID   既定: ~/.config/seigen-spike/team-id
-#   APNS_TOPIC     既定: jp.kechiiiiin.seigenspike
+# 鍵などは環境変数か ~/.config/engawa/ から読む（鍵の中身・JWT・トークンは出力しない）:
+#   APNS_KEY_PATH  既定: ~/.config/engawa/AuthKey_*.p8 の最初の1つ
+#   APNS_KEY_ID    既定: ~/.config/engawa/key-id、無ければファイル名 AuthKey_<KEYID>.p8 から
+#   APNS_TEAM_ID   既定: ~/.config/engawa/team-id
+#   APNS_TOPIC     既定: jp.kechiiiiin.engawa
 #   APNS_HOST      既定: api.sandbox.push.apple.com（開発ビルドなので sandbox）
 #   DEVICE_TOKEN   既定: サーバーの GET /device
 #   SERVER / TOKEN_FILE  サーバー（state とデバイストークンを取る・送った記録を残す）
@@ -18,11 +18,11 @@ set -euo pipefail
 KIND="${1:-}"
 case "$KIND" in alert|silent) ;; *) echo "使い方: $0 alert|silent" >&2; exit 2 ;; esac
 
-CONF="$HOME/.config/seigen-spike"
+CONF="$HOME/.config/engawa"
 SERVER="${SERVER:-$(cat "$CONF/server-url" 2>/dev/null || true)}"
 TOKEN_FILE="${TOKEN_FILE:-$CONF/token}"
 APNS_KEY_PATH="${APNS_KEY_PATH:-$(ls "$CONF"/AuthKey_*.p8 2>/dev/null | head -1 || true)}"
-APNS_TOPIC="${APNS_TOPIC:-jp.kechiiiiin.seigenspike}"
+APNS_TOPIC="${APNS_TOPIC:-jp.kechiiiiin.engawa}"
 APNS_HOST="${APNS_HOST:-api.sandbox.push.apple.com}"
 
 [ -n "$APNS_KEY_PATH" ] && [ -s "$APNS_KEY_PATH" ] || { echo "APNs の鍵（.p8）が無い。APNS_KEY_PATH か $CONF/AuthKey_<KEYID>.p8 に置く" >&2; exit 1; }

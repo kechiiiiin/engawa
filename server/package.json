@@ -1,13 +1,13 @@
 {
-  "name": "seigen-spike-server",
+  "name": "engawa-server",
   "version": "0.1.0",
   "description": "スマホ制限アプリ試作のサーバー（Cloudflare Workers + D1）",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler d1 migrations apply seigen-spike --local && wrangler dev --local --ip 127.0.0.1 --port 8788",
+    "dev": "wrangler d1 migrations apply engawa --local && wrangler dev --local --ip 127.0.0.1 --port 8788",
     "typecheck": "tsc --noEmit",
-    "migrate:remote": "wrangler d1 migrations apply seigen-spike --remote",
+    "migrate:remote": "wrangler d1 migrations apply engawa --remote",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {

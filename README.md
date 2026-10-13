@@ -1,4 +1,6 @@
-# seigen-spike — スマホ制限アプリの試作（スパイク）
+# engawa（縁側） — スマホ制限アプリの試作（スパイク）
+
+縁側: 自分の iPhone の使用時間を縛るアプリ。いまは試作（スパイク）段階。
 
 自分の iPhone を「外（サーバー）から」ロックできるか、許可アプリを除いて使用時間を数えられるかを、実機で決着させるための捨てる前提の試作。
 設計書（正）: jinsei vault `hestia/projects/スマホ制限アプリ試作設計.md`。名前・Bundle ID は仮。
@@ -7,7 +9,7 @@
 
 | ディレクトリ | 中身 |
 |---|---|
-| `App/` | 本体 `SeigenSpike`（認可・許可アプリの選択・前面で同期 R1・サイレントプッシュ R2・経路の切り替え・試験2 の登録・記録の表示と送信） |
+| `App/` | 本体 `Engawa`（認可・許可アプリの選択・前面で同期 R1・サイレントプッシュ R2・経路の切り替え・試験2 の登録・記録の表示と送信） |
 | `MonitorExt/` | DeviceActivityMonitor 拡張（全コールバックで目覚めを記録・R4／R5 でサーバーを見に行く・時間解除の再ロック） |
 | `ShieldConfigExt/` | ロック画面の文言（`ideas.json` か App Group の上書きからランダム） |
 | `ShieldActionExt/` | 「閉じる」ボタン（記録して `.close`） |
@@ -18,12 +20,12 @@
 
 経路: R1 アプリを開いて同期／R2 サイレントプッシュ／R3 alert プッシュ＋NSE／R4 予定の目覚まし（15分×2本）／R5 使用量の目覚まし（使用1分ごと）。
 
-`~/.config/seigen-spike/` に置くもの（リポジトリには入れない）:
+`~/.config/engawa/` に置くもの（リポジトリには入れない）:
 
 | ファイル | 中身 |
 |---|---|
 | `token` | サーバーの Bearer トークン（`openssl rand -hex 32` で作る） |
-| `server-url` | `https://seigen-spike.<サブドメイン>.workers.dev` |
+| `server-url` | `https://engawa.<サブドメイン>.workers.dev` |
 | `team-id` | 有料チームの Team ID（10桁） |
 | `AuthKey_<KEYID>.p8` | APNs の鍵（`key-id` は無くてもファイル名から読む） |
 
@@ -31,20 +33,20 @@
 
 【啓輔・ブラウザ】（初回1回だけ）
 1. developer.apple.com → Membership details で **Team ID** を見る → ヘスティアに伝える
-2. developer.apple.com → Certificates, Identifiers & Profiles → Keys → ＋ → 「Apple Push Notifications service (APNs)」にチェック → 作成 → **.p8 をダウンロード**（1回しか落とせない）→ `~/.config/seigen-spike/` に置く
+2. developer.apple.com → Certificates, Identifiers & Profiles → Keys → ＋ → 「Apple Push Notifications service (APNs)」にチェック → 作成 → **.p8 をダウンロード**（1回しか落とせない）→ `~/.config/engawa/` に置く
 
 【ヘスティア・コマンド】
 ```sh
-mkdir -p ~/.config/seigen-spike && chmod 700 ~/.config/seigen-spike
-echo XXXXXXXXXX > ~/.config/seigen-spike/team-id          # 有料チームの Team ID
-openssl rand -hex 32 > ~/.config/seigen-spike/token && chmod 600 ~/.config/seigen-spike/token
+mkdir -p ~/.config/engawa && chmod 700 ~/.config/engawa
+echo XXXXXXXXXX > ~/.config/engawa/team-id          # 有料チームの Team ID
+openssl rand -hex 32 > ~/.config/engawa/token && chmod 600 ~/.config/engawa/token
 
 # サーバー（初回）
 cd server && npm install
-npx wrangler d1 create seigen-spike                        # 出た database_id を wrangler.jsonc に入れる
-npx wrangler d1 migrations apply seigen-spike --remote
-npx wrangler secret put API_TOKEN < ~/.config/seigen-spike/token
-npx wrangler deploy                                        # 出た URL を ~/.config/seigen-spike/server-url へ
+npx wrangler d1 create engawa                        # 出た database_id を wrangler.jsonc に入れる
+npx wrangler d1 migrations apply engawa --remote
+npx wrangler secret put API_TOKEN < ~/.config/engawa/token
+npx wrangler deploy                                        # 出た URL を ~/.config/engawa/server-url へ
 cd ..
 
 # iOS（iPhone を繋ぐか同じ Wi-Fi で）
@@ -101,5 +103,5 @@ R5 の段数: `make usage-n N=120`（アプリ内の Picker でも可）。登�
 - `*.xcodeproj` は生成物（`xcodegen generate`）。コミットしない
 - `devicectl` でアプリへ引数を渡すときは前に `--`
 - 拡張の `NSExtensionPointIdentifier` は Xcode 27.0 のテンプレート（`Xcode.app/…/Templates/Project Templates/iOS/Application Extension/*.xctemplate/TemplateInfo.plist`）から写した
-- 記録は App Group の `seigen/log.jsonl`（2000行まで）と未送信分の `outbox.jsonl`。ファイル保護は `completeUntilFirstUserAuthentication`
+- 記録は App Group の `engawa/log.jsonl`（2000行まで）と未送信分の `outbox.jsonl`。ファイル保護は `completeUntilFirstUserAuthentication`
 - サーバーの API は設計の7本に `GET /device`（push.sh がデバイストークンを取る用）を足している

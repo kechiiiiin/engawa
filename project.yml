@@ -1,12 +1,12 @@
-name: seigen-spike
+name: engawa
 
 # スマホ制限アプリの試作（スパイク）。捨てる前提。
 # 設計: jinsei vault hestia/projects/スマホ制限アプリ試作設計.md
 #
-# ⚠️ DEVELOPMENT_TEAM は下の settings.base で1か所にまとめている（環境変数 SEIGEN_TEAM_ID）。
+# ⚠️ DEVELOPMENT_TEAM は下の settings.base で1か所にまとめている（環境変数 ENGAWA_TEAM_ID）。
 
 options:
-  bundleIdPrefix: jp.kechiiiiin.seigenspike
+  bundleIdPrefix: jp.kechiiiiin.engawa
   deploymentTarget:
     iOS: "26.0"
   createIntermediateGroups: true
@@ -24,33 +24,33 @@ settings:
     GENERATE_INFOPLIST_FILE: NO
     CODE_SIGN_STYLE: Automatic
     # 有料チーム（Apple Developer Program）の Team ID。2026-10-13 時点で未確認のため環境変数から入れる。
-    # Makefile が ~/.config/seigen-spike/team-id を読んで SEIGEN_TEAM_ID に渡す（xcodegen が ${} を展開する）。
+    # Makefile が ~/.config/engawa/team-id を読んで ENGAWA_TEAM_ID に渡す（xcodegen が ${} を展開する）。
     # 分かったらここに直書きしてよい（秘密ではない）。
     # ⚠️ 無料の Personal Team（7Z4R4TQPZL）を入れないこと。Family Controls が使えないうえ、
     #    この Bundle ID が Personal Team 側に登録されて有料チームで使えなくなるおそれがある。
-    DEVELOPMENT_TEAM: "${SEIGEN_TEAM_ID}"
+    DEVELOPMENT_TEAM: "${ENGAWA_TEAM_ID}"
     # サーバーの URL（秘密ではない）。デプロイ後に workers.dev の URL が決まったら入れる。
     # アプリ内の欄・make import-token でも上書きできる。
-    SEIGEN_SERVER_URL: "https://seigen-spike.kechiiiiin.workers.dev"
+    ENGAWA_SERVER_URL: "https://engawa.kechiiiiin.workers.dev"
     # PushExt の Family Controls を外して試すときは `PUSHEXT_FC_SUFFIX=-noFC` を渡す（1か所で切り替え）
     PUSHEXT_FC_SUFFIX: ""
 
 targets:
-  SeigenSpike:
+  Engawa:
     type: application
     platform: iOS
     sources:
       - path: App
         excludes:
           - "Info.plist"
-          - "SeigenSpike.entitlements"
+          - "Engawa.entitlements"
       - path: Shared
     settings:
       base:
-        PRODUCT_NAME: SeigenSpike
-        PRODUCT_BUNDLE_IDENTIFIER: jp.kechiiiiin.seigenspike
+        PRODUCT_NAME: Engawa
+        PRODUCT_BUNDLE_IDENTIFIER: jp.kechiiiiin.engawa
         INFOPLIST_FILE: App/Info.plist
-        CODE_SIGN_ENTITLEMENTS: App/SeigenSpike.entitlements
+        CODE_SIGN_ENTITLEMENTS: App/Engawa.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
     dependencies:
       - target: MonitorExt
@@ -70,7 +70,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: MonitorExt
-        PRODUCT_BUNDLE_IDENTIFIER: jp.kechiiiiin.seigenspike.monitor
+        PRODUCT_BUNDLE_IDENTIFIER: jp.kechiiiiin.engawa.monitor
         INFOPLIST_FILE: MonitorExt/Info.plist
         CODE_SIGN_ENTITLEMENTS: MonitorExt/MonitorExt.entitlements
         SKIP_INSTALL: YES
@@ -87,7 +87,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: ShieldConfigExt
-        PRODUCT_BUNDLE_IDENTIFIER: jp.kechiiiiin.seigenspike.shieldconfig
+        PRODUCT_BUNDLE_IDENTIFIER: jp.kechiiiiin.engawa.shieldconfig
         INFOPLIST_FILE: ShieldConfigExt/Info.plist
         CODE_SIGN_ENTITLEMENTS: ShieldConfigExt/ShieldConfigExt.entitlements
         SKIP_INSTALL: YES
@@ -104,7 +104,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: ShieldActionExt
-        PRODUCT_BUNDLE_IDENTIFIER: jp.kechiiiiin.seigenspike.shieldaction
+        PRODUCT_BUNDLE_IDENTIFIER: jp.kechiiiiin.engawa.shieldaction
         INFOPLIST_FILE: ShieldActionExt/Info.plist
         CODE_SIGN_ENTITLEMENTS: ShieldActionExt/ShieldActionExt.entitlements
         SKIP_INSTALL: YES
@@ -121,7 +121,7 @@ targets:
     settings:
       base:
         PRODUCT_NAME: PushExt
-        PRODUCT_BUNDLE_IDENTIFIER: jp.kechiiiiin.seigenspike.push
+        PRODUCT_BUNDLE_IDENTIFIER: jp.kechiiiiin.engawa.push
         INFOPLIST_FILE: PushExt/Info.plist
         # Family Controls あり＝PushExt.entitlements／なし＝PushExt-noFC.entitlements
         CODE_SIGN_ENTITLEMENTS: PushExt/PushExt$(PUSHEXT_FC_SUFFIX).entitlements
@@ -129,10 +129,10 @@ targets:
 
 # 共有スキームを明示する（xcodegen の暗黙スキームは xcuserdata にしか出ないため）
 schemes:
-  SeigenSpike:
+  Engawa:
     build:
       targets:
-        SeigenSpike: all
+        Engawa: all
     run:
       config: Debug
     archive:

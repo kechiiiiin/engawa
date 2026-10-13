@@ -20,8 +20,8 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-	<key>SeigenServerURL</key>
-	<string>$(SEIGEN_SERVER_URL)</string>
+	<key>EngawaServerURL</key>
+	<string>$(ENGAWA_SERVER_URL)</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>

@@ -4,8 +4,8 @@ import Foundation
 // App Group のコンテナにファイルとして置く。UserDefaults(suiteName:) はプロセス間でキャッシュがずれるので使わない。
 // ファイル保護は「最初のロック解除まで」（ロック中の拡張から読めるように）。
 
-enum Seigen {
-    static let appGroup = "group.jp.kechiiiiin.seigenspike"
+enum Engawa {
+    static let appGroup = "group.jp.kechiiiiin.engawa"
     static let logLimit = 2000
 }
 
@@ -56,9 +56,9 @@ struct ServerState: Codable, Equatable {
 enum Store {
     static var dir: URL {
         let fm = FileManager.default
-        let base = fm.containerURL(forSecurityApplicationGroupIdentifier: Seigen.appGroup)
+        let base = fm.containerURL(forSecurityApplicationGroupIdentifier: Engawa.appGroup)
             ?? fm.temporaryDirectory
-        let d = base.appendingPathComponent("seigen", isDirectory: true)
+        let d = base.appendingPathComponent("engawa", isDirectory: true)
         if !fm.fileExists(atPath: d.path) {
             try? fm.createDirectory(at: d, withIntermediateDirectories: true,
                                     attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
@@ -101,7 +101,7 @@ enum Store {
     static var serverURL: URL? {
         get {
             if let s = string("serverURL"), !s.isEmpty, let u = URL(string: s) { return u }
-            if let s = Bundle.main.object(forInfoDictionaryKey: "SeigenServerURL") as? String, !s.isEmpty {
+            if let s = Bundle.main.object(forInfoDictionaryKey: "EngawaServerURL") as? String, !s.isEmpty {
                 return URL(string: s)
             }
             return nil
@@ -222,7 +222,7 @@ enum Log {
     static var logURL: URL { Store.url("log.jsonl") }
     static func outboxURL(_ proc: String = LogRecord.currentProc) -> URL { Store.url("outbox-\(proc).jsonl") }
     static func sendingURL(_ proc: String) -> URL { Store.url("outbox-\(proc).sending.jsonl") }
-    static let queue = DispatchQueue(label: "seigen.log")
+    static let queue = DispatchQueue(label: "engawa.log")
     static let outboxLimit = 5000
 
     static func add(_ r: LogRecord) {
@@ -233,7 +233,7 @@ enum Log {
             appendLine(d, to: logURL)
             let ob = outboxURL(r.proc)
             appendLine(d, to: ob)
-            if r.proc == "app" { trimIfNeeded(logURL, keep: Seigen.logLimit) }
+            if r.proc == "app" { trimIfNeeded(logURL, keep: Engawa.logLimit) }
             trimIfNeeded(ob, keep: outboxLimit)   // 自分のファイルだけ
         }
     }
@@ -270,7 +270,7 @@ enum Log {
     }
 
     /// 本体が起動・前面に来たときに呼ぶ
-    static func trimLog() { queue.sync { trimIfNeeded(logURL, keep: Seigen.logLimit) } }
+    static func trimLog() { queue.sync { trimIfNeeded(logURL, keep: Engawa.logLimit) } }
 
     /// 画面に出す用（新しい順）
     static func recent(_ n: Int = 300) -> [LogRecord] {

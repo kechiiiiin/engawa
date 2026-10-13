@@ -8,7 +8,7 @@ xcuserdata/
 server/node_modules/
 server/.wrangler/
 server/.dev.vars
-# 鍵・トークンは ~/.config/seigen-spike/ に置き、リポジトリには入れない
+# 鍵・トークンは ~/.config/engawa/ に置き、リポジトリには入れない
 *.p8
 *.pem
 token

@@ -52,7 +52,7 @@ def main():
             events = json.load(f)["events"]
     else:
         server = os.environ.get("SERVER")
-        token_file = os.environ.get("TOKEN_FILE", os.path.expanduser("~/.config/seigen-spike/token"))
+        token_file = os.environ.get("TOKEN_FILE", os.path.expanduser("~/.config/engawa/token"))
         if not server:
             sys.exit("SERVER が無い")
         with open(token_file) as f:
