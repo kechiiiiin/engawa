@@ -1,0 +1,29 @@
+// スマホ制限アプリ試作のサーバー。GUI は使わず、このファイルと wrangler CLI だけで再現する。
+// 初回:  npx wrangler d1 create seigen-spike  → 出てきた database_id を下に入れる
+//        npx wrangler d1 migrations apply seigen-spike --remote
+//        npx wrangler secret put API_TOKEN          （~/.config/seigen-spike/token の中身）
+//        npx wrangler deploy
+// Worker から APNs を送るときだけ（任意）:
+//        npx wrangler secret put APNS_KEY   （.p8 の中身）／ APNS_KEY_ID ／ APNS_TEAM_ID
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "seigen-spike",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-15",
+  "workers_dev": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "seigen-spike",
+      // ⚠️ `wrangler d1 create seigen-spike` の出力で置き換える（ローカルの wrangler dev はこのままで動く）
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "APNS_TOPIC": "jp.kechiiiiin.seigenspike",
+    // 開発ビルドなので sandbox
+    "APNS_HOST": "api.sandbox.push.apple.com"
+  },
+  "observability": { "enabled": true }
+}

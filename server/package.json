@@ -1,0 +1,18 @@
+{
+  "name": "seigen-spike-server",
+  "version": "0.1.0",
+  "description": "スマホ制限アプリ試作のサーバー（Cloudflare Workers + D1）",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler d1 migrations apply seigen-spike --local && wrangler dev --local --ip 127.0.0.1 --port 8788",
+    "typecheck": "tsc --noEmit",
+    "migrate:remote": "wrangler d1 migrations apply seigen-spike --remote",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260915.1",
+    "typescript": "^5.9.0",
+    "wrangler": "4.131.2"
+  }
+}
