@@ -120,6 +120,12 @@ enum Store {
         set { setString("unlockUntil", newValue.map(ISO.string)) }
     }
 
+    /// relock 間隔を登録したときの対象の unlockUntil（古い relock が新しい解除を打ち消さないように）
+    static var relockFor: Date? {
+        get { string("relockFor").flatMap(ISO.parse) }
+        set { setString("relockFor", newValue.map(ISO.string)) }
+    }
+
     static var routes: Routes {
         get { codable("routes.json", as: Routes.self) ?? Routes() }
         set { setCodable("routes.json", newValue) }
@@ -208,9 +214,16 @@ struct LogRecord: Codable, Identifiable {
 }
 
 enum Log {
+    // 複数プロセス（本体・4拡張）が同じ App Group に書くので:
+    //   - 追記は O_APPEND の fd で1回の write（行が混ざらない）
+    //   - log.jsonl（画面用）の trim は本体だけが行う
+    //   - 未送信分（outbox）はプロセス別のファイル。各プロセスは自分の分だけ消費する
+    //     ただし ShieldConfig（ネットワーク不可）と ShieldAction は自分で送らないので、本体が代わりに送る
     static var logURL: URL { Store.url("log.jsonl") }
-    static var outboxURL: URL { Store.url("outbox.jsonl") }
+    static func outboxURL(_ proc: String = LogRecord.currentProc) -> URL { Store.url("outbox-\(proc).jsonl") }
+    static func sendingURL(_ proc: String) -> URL { Store.url("outbox-\(proc).sending.jsonl") }
     static let queue = DispatchQueue(label: "seigen.log")
+    static let outboxLimit = 5000
 
     static func add(_ r: LogRecord) {
         guard let line = try? JSONEncoder().encode(r) else { return }
@@ -218,9 +231,10 @@ enum Log {
         d.append(0x0A)
         queue.sync {
             appendLine(d, to: logURL)
-            appendLine(d, to: outboxURL)
-            trimIfNeeded(logURL)
-            trimIfNeeded(outboxURL)
+            let ob = outboxURL(r.proc)
+            appendLine(d, to: ob)
+            if r.proc == "app" { trimIfNeeded(logURL, keep: Seigen.logLimit) }
+            trimIfNeeded(ob, keep: outboxLimit)   // 自分のファイルだけ
         }
     }
 
@@ -228,28 +242,35 @@ enum Log {
         add(LogRecord(kind: kind, route: route, ok: ok, error: error, detail: detail))
     }
 
+    /// O_APPEND で開いて1回で書く。新しく作ったときだけファイル保護を付ける
     private static func appendLine(_ d: Data, to u: URL) {
-        let fm = FileManager.default
-        if !fm.fileExists(atPath: u.path) {
-            try? d.write(to: u, options: [.completeFileProtectionUntilFirstUserAuthentication])
-            return
+        let existed = FileManager.default.fileExists(atPath: u.path)
+        let fd = open(u.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+        guard fd >= 0 else { return }
+        defer { close(fd) }
+        if !existed {
+            try? FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: u.path)
         }
-        guard let h = try? FileHandle(forWritingTo: u) else { return }
-        defer { try? h.close() }
-        _ = try? h.seekToEnd()
-        try? h.write(contentsOf: d)
+        d.withUnsafeBytes { buf in
+            guard let base = buf.baseAddress else { return }
+            _ = write(fd, base, buf.count)
+        }
     }
 
-    /// 2000 行を超えたら古いものから捨てる。毎回数えると重いので、大きさで当たりを付けてから数える
-    private static func trimIfNeeded(_ u: URL) {
+    /// keep 行を超えたら古いものから捨てる。毎回数えると重いので、大きさで当たりを付けてから数える
+    private static func trimIfNeeded(_ u: URL, keep: Int) {
         let size = (try? FileManager.default.attributesOfItem(atPath: u.path)[.size] as? Int) ?? 0
-        guard size > 400_000, let d = try? Data(contentsOf: u) else { return }
+        guard size > keep * 200, let d = try? Data(contentsOf: u) else { return }
         let lines = d.split(separator: 0x0A, omittingEmptySubsequences: true)
-        guard lines.count > Seigen.logLimit else { return }
+        guard lines.count > keep else { return }
         var out = Data()
-        for l in lines.suffix(Seigen.logLimit) { out.append(contentsOf: l); out.append(0x0A) }
+        for l in lines.suffix(keep) { out.append(contentsOf: l); out.append(0x0A) }
         try? out.write(to: u, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
+
+    /// 本体が起動・前面に来たときに呼ぶ
+    static func trimLog() { queue.sync { trimIfNeeded(logURL, keep: Seigen.logLimit) } }
 
     /// 画面に出す用（新しい順）
     static func recent(_ n: Int = 300) -> [LogRecord] {
@@ -259,19 +280,28 @@ enum Log {
         return lines.reversed().compactMap { try? dec.decode(LogRecord.self, from: Data($0)) }
     }
 
-    /// 未送信の記録をサーバーへ送る。送る前に別名へ退避し、失敗したら戻す
+    /// 未送信の記録をサーバーへ送る。自分の outbox を rename で取り出して送信待ちに足し、失敗したら次に持ち越す。
+    /// 本体からは ShieldConfig／ShieldAction の分も送る
     @discardableResult
-    static func flush(timeout: TimeInterval = 10) -> String {
-        let sending = Store.url("outbox.sending.jsonl")
+    static func flush(timeout: TimeInterval = 4) -> String {
+        let me = LogRecord.currentProc
+        let procs = me == "app" ? ["app", "shieldConfig", "shieldAction"] : [me]
+        return procs.map { p in "\(p): \(flush(proc: p, timeout: timeout))" }.joined(separator: " / ")
+    }
+
+    private static func flush(proc: String, timeout: TimeInterval) -> String {
         let fm = FileManager.default
+        let sending = sendingURL(proc)
         var payload = Data()
         queue.sync {
-            if fm.fileExists(atPath: sending.path), let old = try? Data(contentsOf: sending) {
-                payload.append(old)   // 前回の送り残し
+            if let old = try? Data(contentsOf: sending) { payload.append(old) }   // 前回の送り残し
+            // rename は不可分。追記中の相手は、開いた fd のまま取り出した側のファイルに書く
+            let taking = Store.url("outbox-\(proc).taking-\(UUID().uuidString).jsonl")
+            if (try? fm.moveItem(at: outboxURL(proc), to: taking)) != nil {
+                if let d = try? Data(contentsOf: taking) { payload.append(d) }
+                try? payload.write(to: sending, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                try? fm.removeItem(at: taking)
             }
-            if let d = try? Data(contentsOf: outboxURL) { payload.append(d) }
-            try? fm.removeItem(at: outboxURL)
-            try? payload.write(to: sending, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         }
         let lines = payload.split(separator: 0x0A, omittingEmptySubsequences: true)
         if lines.isEmpty { try? fm.removeItem(at: sending); return "送るものなし" }
@@ -294,7 +324,7 @@ enum Log {
 }
 
 // MARK: - ネットワーク（同期待ち）
-// 拡張は同期の処理が返った時点で終了させられる（二次情報）ので、セマフォで待つ形にしている。
+// 拡張は同期の処理が返った時点で終了させられる（二次情報）ので、セマフォで待つ形にしている（既定5秒）。
 // 本体からはメインスレッド以外で呼ぶこと。
 
 enum NetError: LocalizedError {
@@ -312,14 +342,15 @@ enum NetError: LocalizedError {
 enum Net {
     static let session: URLSession = {
         let c = URLSessionConfiguration.ephemeral
-        c.timeoutIntervalForRequest = 10
-        c.timeoutIntervalForResource = 15
+        // 拡張の持ち時間に合わせて短めに（Net 5秒・Log.flush 4秒）
+        c.timeoutIntervalForRequest = 5
+        c.timeoutIntervalForResource = 8
         c.waitsForConnectivity = false
         return URLSession(configuration: c)
     }()
 
     static func request(_ method: String, _ path: String, body: Data? = nil,
-                        timeout: TimeInterval = 10) -> Result<(Int, Data), Error> {
+                        timeout: TimeInterval = 5) -> Result<(Int, Data), Error> {
         guard let base = Store.serverURL else { return .failure(NetError.noServer) }
         guard let token = Store.token else { return .failure(NetError.noToken) }
         guard let url = URL(string: path, relativeTo: base) else { return .failure(NetError.noServer) }

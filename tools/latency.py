@@ -88,6 +88,31 @@ def main():
     if not counts:
         print("（まだ無い）")
 
+    # R3: push.sh が送った時刻（macPush.ts = SENT_AT）からの遅れ。version で突き合わせ、反映より前の最後の送信を使う
+    pushes = defaultdict(list)
+    for e in events:
+        if e.get("kind") == "macPush" and e.get("route") == "R3" and e.get("version") is not None:
+            t = parse(e.get("ts"))
+            if t:
+                pushes[e["version"]].append(t)
+    r3 = []
+    for e in events:
+        if e.get("kind") != "apply" or e.get("route") != "R3":
+            continue
+        t = parse(e.get("appliedAt"))
+        cands = [p for p in pushes.get(e.get("version"), []) if t and p <= t]
+        if t and cands:
+            r3.append((e.get("version"), (t - max(cands)).total_seconds()))
+    if counts.get("R3"):
+        print("\nR3 送信から反映まで（appliedAt − macPush.ts）: ", end="")
+        if r3:
+            xs = [x for _, x in r3]
+            print(f"{len(xs)} 件・中央値 {statistics.median(xs):.1f}s・最大 {max(xs):.1f}s・60秒以内 {sum(x <= 60 for x in xs)}/{len(xs)}")
+            for v, x in r3:
+                print(f"  v{v}: {x:.1f}s")
+        else:
+            print("突き合わせられる macPush なし")
+
     # 試験1-3: アプリを開いてから（foreground）R1 の反映まで
     opened = None
     gaps = []
@@ -139,6 +164,24 @@ def main():
         t = parse(e.get("ts"))
         print(f"  {t.astimezone(jst).strftime('%m-%d %H:%M:%S') if t else '?'}  {e.get('kind')}  {e.get('detail')}")
     if not th:
+        print("（まだ無い）")
+
+    # 試験4: 時間解除の終わり（unlockUntil）から再ロックまで（appliedAt − unlockUntil）
+    print("\n■ 試験4 再ロック（appliedAt − unlockUntil）")
+    rl = []
+    for e in events:
+        if e.get("kind") != "relock" or not e.get("appliedAt"):
+            continue
+        d = e.get("detail") or ""
+        until = parse(d.split("unlockUntil=", 1)[1].split()[0]) if "unlockUntil=" in d else None
+        t = parse(e.get("appliedAt"))
+        if until and t:
+            rl.append((t, e.get("route"), (t - until).total_seconds()))
+    for t, route, x in rl:
+        print(f"  {t.astimezone(jst).strftime('%m-%d %H:%M:%S')}  {route:<14}{x / 60:6.1f}分（{x:.0f}s）")
+    if rl:
+        print(f"  最大 {max(x for _, _, x in rl) / 60:.1f}分（解除15分なら 15〜17分＝この値が 0〜2分なら本命の合格）")
+    else:
         print("（まだ無い）")
 
     # 4. その他

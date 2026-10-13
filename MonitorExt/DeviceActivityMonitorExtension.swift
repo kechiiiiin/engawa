@@ -3,7 +3,7 @@ import Foundation
 import ManagedSettings
 
 // 全コールバックで「目覚めた記録」を残す（受け入れ条件18）。
-// ネットワークは Net の同期待ち（タイムアウト10秒）。失敗しても記録だけ残して返る（同19）。
+// ネットワークは Net の同期待ち（タイムアウト5秒・記録の送信は4秒）。失敗しても記録だけ残して返る（同19）。
 // メモリ上限は約6MB の報告があるので、外部ライブラリは入れない。
 
 class DeviceActivityMonitorExtension: DeviceActivityMonitor {
@@ -29,7 +29,10 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
                 Log.add(kind: "arm", route: "R4", ok: err == nil, error: err, detail: "rearm \(activity.rawValue)")
             }
         } else if activity == .relock {
-            DeviceActivityCenter().stopMonitoring([.relock])
+            // 新しい時間解除のために登録し直した relock を消さないよう、期限が無いか過ぎているときだけ止める
+            if Store.unlockUntil.map({ $0 <= Date() }) ?? true {
+                DeviceActivityCenter().stopMonitoring([.relock])
+            }
         }
         finish(activity)
     }
@@ -87,14 +90,19 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
     /// 時間解除の終わり。そのあいだに別の指示（無期限解除など）が来ていたら掛けない
     private func relock() {
         let until = Store.unlockUntil
-        if let until, until <= Date().addingTimeInterval(120) {
+        let target = Store.relockFor
+        // 登録したときの対象（relockFor）と今の unlockUntil が同じときだけ掛ける（古い relock を無視する）
+        let matches = until != nil && target != nil && abs(until!.timeIntervalSince(target!)) < 1
+        if let until, matches, until <= Date().addingTimeInterval(120) {
             Shield.lockNow()
             Store.unlockUntil = nil
+            Store.relockFor = nil
             Log.add(LogRecord(kind: "relock", route: "relock", version: Store.appliedVersion, locked: true,
                               appliedAt: ISO.now, ok: Shield.isShielded, error: Shield.isShielded ? nil : "読み戻しで shield なし",
                               detail: "unlockUntil=\(ISO.string(until))"))
         } else {
-            Log.add(kind: "relock", route: "relock", ok: true, detail: "掛けない（unlockUntil=\(until.map(ISO.string) ?? "なし")）")
+            Log.add(kind: "relock", route: "relock", ok: true,
+                    detail: "掛けない（unlockUntil=\(until.map(ISO.string) ?? "なし") relockFor=\(target.map(ISO.string) ?? "なし")）")
         }
     }
 
@@ -110,6 +118,8 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
 
     /// 経路がオンならサーバーを見に行って反映し、記録を送る
     private func finish(_ activity: DeviceActivityName) {
+        // どのコールバックでも、期限切れの時間解除が外れたままなら掛け直す（relock の取りこぼしの自己修復）
+        Shield.healExpiredUnlock()
         let r = Store.routes
         let wantsSync = ((activity == .pollA || activity == .pollB) && r.poll) || (activity == .usage && r.usageWake)
         if wantsSync {

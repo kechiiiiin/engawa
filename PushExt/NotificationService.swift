@@ -37,7 +37,7 @@ class NotificationService: UNNotificationServiceExtension {
         content.body = content.body.isEmpty ? suffix : "\(content.body)\n\(suffix)"
 
         // 可能なら記録をサーバーへ（短めに待つ）
-        Log.flush(timeout: 5)
+        Log.flush()
 
         contentHandler(content)
         self.contentHandler = nil

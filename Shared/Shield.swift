@@ -65,6 +65,8 @@ enum Shield {
     static func apply(_ s: ServerState, route: String) -> ApplyResult {
         let now = Date()
         guard s.version > Store.appliedVersion else {
+            // 同じ版でも、時間解除の期限切れで外れたままなら掛け直す（relock の取りこぼしの自己修復）
+            healExpiredUnlock()
             return ApplyResult(applied: false, ok: true, locked: isShielded, error: nil)
         }
         var locked = s.locked
@@ -75,13 +77,16 @@ enum Shield {
         if locked {
             lockNow()
             Store.unlockUntil = nil
+            Store.relockFor = nil
             DeviceActivityCenter().stopMonitoring([.relock])
         } else {
             unlockNow()
             Store.unlockUntil = until
             if let until {
-                if let e = Wake.armRelock(at: until) { errors.append("relock 登録失敗: \(e)") }
+                // 登録に失敗しても止まらない: 期限切れのあとは healExpiredUnlock()（同期・MonitorExt の全コールバック）が掛け直す
+                if let e = Wake.armRelock(at: until) { errors.append("relock 登録失敗（自己修復に任せる）: \(e)") }
             } else {
+                Store.relockFor = nil
                 DeviceActivityCenter().stopMonitoring([.relock])
             }
         }
@@ -98,6 +103,22 @@ enum Shield {
                           error: ok ? nil : errors.joined(separator: " / "),
                           detail: s.unlockUntil.map { "unlockUntil=\($0)" }))
         return ApplyResult(applied: true, ok: ok, locked: locked, error: ok ? nil : errors.joined(separator: " / "))
+    }
+
+    /// 時間解除の期限が過ぎているのに外れたままなら、ロックを掛け直す（armRelock の失敗や
+    /// intervalDidStart(relock) の取りこぼしの自己修復）。掛けたら true
+    @discardableResult
+    static func healExpiredUnlock(route: String = "sync-fallback") -> Bool {
+        guard let until = Store.unlockUntil, until <= Date() else { return false }
+        Store.unlockUntil = nil
+        Store.relockFor = nil
+        guard !isShielded else { return false }   // もう掛かっている（relock が先に効いた）
+        lockNow()
+        let ok = isShielded
+        Log.add(LogRecord(kind: "relock", route: route, version: Store.appliedVersion, locked: true,
+                          appliedAt: ISO.now, ok: ok, error: ok ? nil : "読み戻しで shield なし",
+                          detail: "unlockUntil=\(ISO.string(until))"))
+        return true
     }
 
     /// 取りに行って反映する（R1・R2・R4・R5）
@@ -140,6 +161,7 @@ enum Wake {
     /// 時間解除の終わりに始まる間隔を登録し、MonitorExt.intervalDidStart(relock) で掛け直す。失敗なら理由
     static func armRelock(at until: Date) -> String? {
         let start = max(until, Date().addingTimeInterval(5))
+        Store.relockFor = until   // MonitorExt はこの値と unlockUntil が一致するときだけ掛ける
         do {
             try DeviceActivityCenter().startMonitoring(.relock, during: oneShot(from: start))
             return nil

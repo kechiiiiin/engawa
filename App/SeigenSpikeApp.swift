@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        Log.trimLog()   // log.jsonl の trim は本体だけが行う
         LaunchConfig.importFiles()
         LaunchConfig.applyArguments()
         Log.add(kind: "launch", detail: Store.routes.summary)
@@ -65,6 +66,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             Log.flush(timeout: 8)
             completionHandler(r?.applied == true ? .newData : .noData)
         }
+    }
+
+    // 端末のロックが解除された（データ保護が解けた）。本体が動いているときだけ呼ばれる
+    func applicationProtectedDataDidBecomeAvailable(_ application: UIApplication) {
+        Log.add(kind: "deviceUnlocked", detail: "state=\(application.applicationState.rawValue)")
     }
 
     // 前面にいるときも通知を出す

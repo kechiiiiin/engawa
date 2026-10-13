@@ -120,58 +120,81 @@ async function maybePush(env: Env, kind: string | null, s: StatePayload) {
   return { push: kind, ...result };
 }
 
-interface DeviceEvent {
-  id?: string;
-  ts?: string;
-  proc?: string;
-  kind?: string;
-  route?: string | null;
-  version?: number | null;
-  locked?: boolean | null;
-  serverChangedAt?: string | null;
-  appliedAt?: string | null;
-  ok?: boolean | null;
-  error?: string | null;
-  detail?: string | null;
-}
-
-const b = (v: boolean | null | undefined) => (v === null || v === undefined ? null : v ? 1 : 0);
+// 端末から来る値は信用しない。文字列・数値・真偽以外（オブジェクト・配列など）は null に落とす
+type Scalar = string | number | boolean | null;
+const scalar = (v: unknown): Scalar =>
+  typeof v === "string" || typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v)) ? v : null;
+const text = (v: unknown): string | null => {
+  const x = scalar(v);
+  return x === null ? null : String(x).slice(0, 2000);
+};
+const int = (v: unknown): number | null => {
+  const x = scalar(v);
+  const n = typeof x === "number" ? x : typeof x === "string" && x.trim() !== "" ? Number(x) : NaN;
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+};
+const bool = (v: unknown): number | null => {
+  const x = scalar(v);
+  if (typeof x === "boolean") return x ? 1 : 0;
+  if (x === 0 || x === 1) return x;
+  return null;
+};
 
 async function postEvents(req: Request, env: Env) {
-  let body: { events?: DeviceEvent[] };
+  let body: unknown;
   try {
     body = await req.json();
   } catch {
     return json({ error: "JSON が読めない" }, 400);
   }
-  const events = Array.isArray(body.events) ? body.events : [];
-  if (events.length > 5000) return json({ error: "多すぎる（5000件まで）" }, 413);
+  const raw = body && typeof body === "object" && Array.isArray((body as { events?: unknown }).events)
+    ? ((body as { events: unknown[] }).events)
+    : [];
+  if (raw.length > 5000) return json({ error: "多すぎる（5000件まで）" }, 413);
   const received = nowIso();
   const stmt = env.DB.prepare(
     `INSERT OR IGNORE INTO events
      (id, source, received_at, ts, proc, kind, route, version, locked, server_changed_at, applied_at, ok, error, detail)
      VALUES (?, 'device', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  const batch = events
-    .filter((e) => typeof e.id === "string" && e.id.length > 0)
-    .map((e) =>
-      stmt.bind(
-        e.id!, received, e.ts ?? null, e.proc ?? null, e.kind ?? null, e.route ?? null, e.version ?? null,
-        b(e.locked), e.serverChangedAt ?? null, e.appliedAt ?? null, b(e.ok), e.error ?? null, e.detail ?? null,
-      ),
-    );
-  // D1 の batch は大きすぎると失敗するので 100 件ずつ
-  let inserted = 0;
-  for (let i = 0; i < batch.length; i += 100) {
-    const res = await env.DB.batch(batch.slice(i, i + 100));
-    inserted += res.reduce((n, r) => n + (r.meta.changes ?? 0), 0);
+  let skipped = 0;
+  const batch: D1PreparedStatement[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) { skipped++; continue; }
+    const e = item as Record<string, unknown>;
+    const id = text(e.id);
+    if (!id) { skipped++; continue; }
+    batch.push(stmt.bind(
+      id, received, text(e.ts), text(e.proc), text(e.kind), text(e.route), int(e.version), bool(e.locked),
+      text(e.serverChangedAt), text(e.appliedAt), bool(e.ok), text(e.error), text(e.detail),
+    ));
   }
-  return json({ received: events.length, inserted });
+  // D1 の batch は大きすぎると失敗するので 100 件ずつ。塊が失敗したら1件ずつ入れ直し、入らないものだけ捨てる
+  let inserted = 0;
+  let rejected = 0;
+  for (let i = 0; i < batch.length; i += 100) {
+    const chunk = batch.slice(i, i + 100);
+    try {
+      const res = await env.DB.batch(chunk);
+      inserted += res.reduce((n, r) => n + (r.meta.changes ?? 0), 0);
+    } catch {
+      for (const st of chunk) {
+        try {
+          const r = await st.run();
+          inserted += r.meta.changes ?? 0;
+        } catch {
+          rejected++;
+        }
+      }
+    }
+  }
+  return json({ received: raw.length, inserted, skipped, rejected });
 }
 
 async function getEvents(url: URL, env: Env) {
   const since = url.searchParams.get("since") ?? "1970-01-01T00:00:00Z";
-  const limit = Math.min(Number(url.searchParams.get("limit") ?? "5000") || 5000, 20000);
+  const n = Math.trunc(Number(url.searchParams.get("limit") ?? "5000"));
+  const limit = Math.min(Math.max(1, Number.isFinite(n) ? n : 5000), 20000);   // 数でなければ 5000、1〜20000 に収める
   const { results } = await env.DB.prepare(
     `SELECT id, source, received_at AS receivedAt, ts, proc, kind, route, version, locked,
             server_changed_at AS serverChangedAt, applied_at AS appliedAt, ok, error, detail
