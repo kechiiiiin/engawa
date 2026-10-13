@@ -15,8 +15,8 @@
     {
       "binding": "DB",
       "database_name": "engawa",
-      // ⚠️ `wrangler d1 create engawa` の出力で置き換える（ローカルの wrangler dev はこのままで動く）
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      // `wrangler d1 create engawa` で作成済み（2026-10-13）
+      "database_id": "d2263c45-7b4c-42d6-9f43-79d2fb83733e",
       "migrations_dir": "migrations"
     }
   ],
