@@ -14,7 +14,7 @@ struct SettingsView: View {
                 let apps = model.selection.applicationTokens.count
                 let cats = model.selection.categoryTokens.count
                 let domains = model.selection.webDomainTokens.count
-                LabeledContent("選んでいるもの", value: "アプリ \(apps)・カテゴリ \(cats)・サイト \(domains)")
+                LabeledContent("選んでいるもの", value: "\(apps + cats + domains)件")
                 Button("許可アプリを選び直す") { showPicker = true }
                 if apps + domains > 50 {
                     Text("50個を超えています。ロックの例外にできるのは合わせて50個までです。")
@@ -29,23 +29,14 @@ struct SettingsView: View {
                     Text("まだ選んでいません")
                         .font(.footnote).foregroundStyle(.secondary)
                 } else {
-                    if apps > 0 {
-                        Text("アプリ").font(.caption).foregroundStyle(.secondary)
-                        ForEach(Array(model.selection.applicationTokens), id: \.self) { token in
-                            Label(token)
-                        }
+                    ForEach(Array(model.selection.applicationTokens), id: \.self) { token in
+                        Label(token)
                     }
-                    if cats > 0 {
-                        Text("カテゴリ").font(.caption).foregroundStyle(.secondary)
-                        ForEach(Array(model.selection.categoryTokens), id: \.self) { token in
-                            Label(token)
-                        }
+                    ForEach(Array(model.selection.categoryTokens), id: \.self) { token in
+                        Label(token)
                     }
-                    if domains > 0 {
-                        Text("サイト").font(.caption).foregroundStyle(.secondary)
-                        ForEach(Array(model.selection.webDomainTokens), id: \.self) { token in
-                            Label(token)
-                        }
+                    ForEach(Array(model.selection.webDomainTokens), id: \.self) { token in
+                        Label(token)
                     }
                 }
 
