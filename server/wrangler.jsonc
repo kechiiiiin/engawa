@@ -1,8 +1,7 @@
 // スマホ制限アプリ試作のサーバー。GUI は使わず、このファイルと wrangler CLI だけで再現する。
 // 初回:  npx wrangler d1 create engawa  → 出てきた database_id を下に入れる
-//        npx wrangler d1 migrations apply engawa --remote
 //        npx wrangler secret put API_TOKEN          （~/.config/engawa/token の中身）
-//        npx wrangler deploy
+//        npm run release    （= remote のマイグレーション → deploy。更新のたびにこれで。deploy を先にしない）
 // Worker から APNs を送るときだけ（任意）:
 //        npx wrangler secret put APNS_KEY   （.p8 の中身）／ APNS_KEY_ID ／ APNS_TEAM_ID
 {

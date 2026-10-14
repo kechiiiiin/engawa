@@ -153,8 +153,8 @@ final class AppModel: ObservableObject {
         Shield.startSelfLock(until: until, choice: choice.rawValue)
         refreshHome()
         let end = Store.selfLockUntil ?? until
-        if let before, before > until {
-            unlockMessage = "すでに \(LockReason.clock.string(from: before)) までセルフロック中です（短くはしません）"
+        if let before, before >= until {
+            unlockMessage = "すでに \(LockReason.clock.string(from: before)) までセルフロック中です（短くはせず、解除中のものもそのままです）"
         } else {
             unlockMessage = "\(LockReason.clock.string(from: end)) までロックしました"
         }

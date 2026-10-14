@@ -12,8 +12,8 @@
 - ホーム（`App/HomeView.swift`）: ロック中か・理由（枠切れ／手動／時間解除の残り）・今日の使用時間と残りの枠・「解除する」（理由必須＋15／30／60分）・代わりにやりたいこと
 - 設定（`App/SettingsView.swift`）: 許可アプリ・1日の枠（初期 2時間30分）・リセット時刻（初期 4:00）・やりたいこと一覧の編集。奥に「開発者向け」（`App/DeveloperView.swift` = 試作の計測用画面）
 - ロックの決め方は三層: `ロックする = (手動ロック || 枠ロック) && !時間解除中`（`Shared/Shield.swift` の `reconcile`）。手動ロックはサーバー（`make lock`）、枠ロックは端末、時間解除はサーバー（`make unlock M=`）か縁側アプリ
-- 2026-10-14 追加: **セルフロック**（ホームの「いまからロック」・1時間／2時間／朝のリセットまで）を第4の層に足した: `ロックする = (手動 || 枠 || セルフ) && !時間解除中`。端末だけで完結（サーバーの state は変えない・イベント `selfLock` を送る）。かけると時間解除・個別解除は打ち消す。期限の目覚ましは `.selfLockEnd`
-- 2026-10-14 追加: **アプリ個別の解除**（ロック中のホーム「アプリを選んで解除」→ 理由 → 15／30／60分）。選んだアプリを期限つきで shield の例外に足す（許可アプリと合わせて50個まで）。トークンは端末の `app-unlocks.json` だけ、サーバーへは `kind: "apps"` と `appCount` だけ（`server/migrations/0003_unlock_kind.sql`）。期限の目覚ましは `.appRelock`、期限切れは `reconcile` が外す
+- 2026-10-14 追加: **セルフロック**（ホームの「いまからロック」・1時間／2時間／朝のリセットまで）を第4の層に足した: `ロックする = (手動 || 枠 || セルフ) && !時間解除中`。サーバーの期限なしの解除（`make unlock`・ヘスティアからの解除）はセルフロックも外す（本人が頼んだ解除なので）。期限つきの `make unlock M=` は今どおり時間解除として全層を一時的に外す。端末だけで完結（サーバーの state は変えない・イベント `selfLock` を送る）。かけると時間解除・個別解除は打ち消す。期限の目覚ましは `.selfLockEnd`
+- 2026-10-14 追加: **アプリ個別の解除**（ロック中のホーム「アプリを選んで解除」→ 理由 → 15／30／60分）。選んだアプリを期限つきで shield の例外に足す（許可アプリと合わせて50個まで）。トークンは端末の `app-unlocks/`（1件1ファイル）だけ、サーバーへは `kind: "apps"` と `appCount` だけ（`server/migrations/0003_unlock_kind.sql`）。期限の目覚ましは `.appRelock`、期限切れは `reconcile` が外す
 - 枠（`Shared/Quota.swift`）: 監視 `daily`（リセット時刻〜翌日の1分前）に段階イベント `all-k`＋`quota`。**数え方の差し替え点はこのファイルだけ**（試験2 待ち。初期は許可アプリ込み）
 - やりたいこと一覧は App Group の `ideas.json`（`Shared/Ideas.swift`。無ければ既定の10件）。Shield はここからランダム
 - アプリからの解除は `POST /unlocks` に理由つきで記録（届かなければ App Group に溜めて次に送る）。履歴は `make unlocks`
@@ -57,10 +57,12 @@ openssl rand -hex 32 > ~/.config/engawa/token && chmod 600 ~/.config/engawa/toke
 # サーバー（初回）
 cd server && npm install
 npx wrangler d1 create engawa                        # 出た database_id を wrangler.jsonc に入れる
-npx wrangler d1 migrations apply engawa --remote
 npx wrangler secret put API_TOKEN < ~/.config/engawa/token
-npx wrangler deploy                                        # 出た URL を ~/.config/engawa/server-url へ
+npm run release                                      # remote のマイグレーション → deploy。出た URL を ~/.config/engawa/server-url へ
 cd ..
+
+# サーバーの更新（2回目以降）も必ず release で（マイグレーションより先に deploy すると新しい列で 500 になる）
+cd server && npm run release && cd ..
 
 # iOS（iPhone を繋ぐか同じ Wi-Fi で）
 make resign            # generate → build（-allowProvisioningUpdates）→ install

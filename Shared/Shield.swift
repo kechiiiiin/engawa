@@ -114,6 +114,12 @@ enum Shield {
             clearUnlock()
         }
         // 期限切れのサーバーの時間解除・無期限の解除（locked=false・期限なし）は、アプリでの時間解除を残す
+        // 期限なしの解除（ヘスティアからの解除）は、本人が頼んだ解除なのでセルフロックも外す。
+        // 期限つきの解除（/unlock?minutes=）は時間解除として全層を一時的に外すだけ（セルフロックは残る）
+        if !s.locked, until == nil, let sl = Store.selfLockUntil {
+            Store.selfLockUntil = nil
+            Log.add(kind: "selfLockCleared", route: route, detail: "サーバーの期限なしの解除で外した selfLockUntil=\(ISO.string(sl))")
+        }
         Store.appliedVersion = s.version
 
         let st = reconcile(route: route)
@@ -271,19 +277,25 @@ enum Shield {
     }
 
     /// セルフロックをかける（延ばす）。期限は今のものより短くしない。
-    /// 新しいロックの指示なので、時間解除・個別解除は打ち消す（サーバーの /lock と同じ扱い）
+    /// かけた・延ばしたときは新しいロックの指示なので、時間解除・個別解除は打ち消す（サーバーの /lock と同じ扱い）。
+    /// 延ばさなかった（新しい期限 ≤ 今の期限）ときは何も変えない
     @discardableResult
     static func startSelfLock(until: Date, choice: String) -> LockStatus {
         let old = Store.selfLockUntil
-        let newUntil = max(old ?? until, until)
-        Store.selfLockUntil = newUntil
+        if let old, until <= old {
+            let st = reconcile(route: "selfLock")
+            Log.add(kind: "selfLock", route: "app", ok: true,
+                    detail: "choice=\(choice) until=\(ISO.string(until)) 今の期限 \(ISO.string(old)) より短いので変えない")
+            return st
+        }
+        Store.selfLockUntil = until
         let hadUnlock = Store.unlockUntil
         if hadUnlock != nil { clearUnlock() }
         clearAppUnlocks(route: "selfLock")
         let st = reconcile(route: "selfLock")
         Log.add(LogRecord(kind: "selfLock", route: "app", version: Store.appliedVersion, locked: st.locked,
                           appliedAt: ISO.now, ok: st.locked && isShielded,
-                          detail: "choice=\(choice) until=\(ISO.string(newUntil))"
+                          detail: "choice=\(choice) until=\(ISO.string(until))"
                               + (old.map { " 前=\(ISO.string($0))" } ?? "")
                               + (hadUnlock.map { " 時間解除を打ち消し=\(ISO.string($0))" } ?? "")))
         return st

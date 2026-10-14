@@ -195,9 +195,13 @@ struct HomeView: View {
 
     private var selfLockMessage: String {
         var lines = ["選んだ時間が来ると自動で終わります。"]
-        if model.selfLockUntil != nil { lines.append("今の終わりより短くはなりません。") }
+        if model.selfLockUntil != nil {
+            lines.append("今の終わりより短くはなりません（短い時間を選んだときは何も変えません）。")
+        }
         if model.unlockUntil != nil || !model.appUnlocks.isEmpty {
-            lines.append("解除中の時間・個別の解除は終わりにします。")
+            lines.append(model.selfLockUntil == nil
+                         ? "解除中の時間・個別の解除は終わりにします。"
+                         : "延びるときは、解除中の時間・個別の解除を終わりにします。")
         }
         return lines.joined(separator: "\n")
     }

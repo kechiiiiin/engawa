@@ -28,12 +28,60 @@ struct AppUnlock: Codable, Equatable {
 enum AppUnlocks {
     /// shield の例外にできる上限（許可アプリと合わせて）
     static let limit = 50
-    static let file = "app-unlocks.json"
+    /// 1件1ファイルで置く（pending-unlocks/ と同じ。本体・MonitorExt・PushExt が同時に触っても、
+    /// 読んで書き戻すことをしないので取りこぼさない）。add＝作る・prune＝期限切れを消す・clear＝全部消す
+    static let dirName = "app-unlocks"
+    /// 以前の1ファイル置き（あれば初回に移す）
+    static let legacyFile = "app-unlocks.json"
 
-    /// 保存されている全件（期限切れも含む。外すのは reconcile）
+    static var dir: URL {
+        let d = Store.dir.appendingPathComponent(dirName, isDirectory: true)
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: d.path) {
+            try? fm.createDirectory(
+                at: d, withIntermediateDirectories: true,
+                attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication])
+        }
+        migrateLegacy(into: d)
+        return d
+    }
+
+    private static func migrateLegacy(into d: URL) {
+        guard let old = Store.codable(legacyFile, as: [AppUnlock].self) else {
+            if Store.data(legacyFile) != nil { Store.setData(legacyFile, nil) }   // 読めないものは捨てる
+            return
+        }
+        for u in old { write(u, in: d) }
+        Store.setData(legacyFile, nil)
+        Log.add(kind: "appUnlockMigrate", detail: "app-unlocks.json から \(old.count) 件を移した")
+    }
+
+    private static func write(_ u: AppUnlock, in d: URL) {
+        guard let data = try? JSONEncoder().encode(u) else { return }
+        try? data.write(to: d.appendingPathComponent("\(UUID().uuidString).json"),
+                        options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    private static func files() -> [URL] {
+        let d = dir
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: d.path)) ?? []
+        return names.filter { $0.hasSuffix(".json") }.map { d.appendingPathComponent($0) }
+    }
+
+    private static func entries() -> [(url: URL, unlock: AppUnlock)] {
+        files().compactMap { u in
+            guard let d = try? Data(contentsOf: u), let v = try? JSONDecoder().decode(AppUnlock.self, from: d) else { return nil }
+            return (u, v)
+        }
+    }
+
+    /// 保存されている全件（期限切れも含む。同じアプリが複数あれば長い方だけ）
     static var all: [AppUnlock] {
-        get { Store.codable(file, as: [AppUnlock].self) ?? [] }
-        set { Store.setCodable(file, newValue.isEmpty ? nil : newValue) }
+        var best: [ApplicationToken: AppUnlock] = [:]
+        for (_, u) in entries() where (best[u.token]?.untilDate ?? .distantPast) < u.untilDate {
+            best[u.token] = u
+        }
+        return Array(best.values)
     }
 
     /// まだ期限の来ていないもの（画面用。書き込みはしない）。終わりの早い順
@@ -45,16 +93,30 @@ enum AppUnlocks {
         Set(active(now).map(\.token))
     }
 
-    /// 期限が now 以前のものを消す。消した件数
+    /// 期限が now 以前のファイルを消す（読めないファイルも消す）。消したアプリの数
     @discardableResult
     static func prune(before now: Date) -> Int {
-        let a = all
-        let keep = a.filter { $0.untilDate > now }
-        if keep.count != a.count { all = keep }
-        return a.count - keep.count
+        let fm = FileManager.default
+        var removed = Set<Data>()
+        for u in files() {
+            guard let d = try? Data(contentsOf: u), let v = try? JSONDecoder().decode(AppUnlock.self, from: d) else {
+                try? fm.removeItem(at: u)
+                continue
+            }
+            if v.untilDate <= now {
+                try? fm.removeItem(at: u)
+                if let k = try? JSONEncoder().encode(v.token) { removed.insert(k) }
+            }
+        }
+        guard !removed.isEmpty else { return 0 }
+        // 同じアプリの長い方が残っていれば、そのアプリは外れていないので数えない
+        let still = Set(entries().compactMap { try? JSONEncoder().encode($0.unlock.token) })
+        return removed.subtracting(still).count
     }
 
-    static func clear() { all = [] }
+    static func clear() {
+        for u in files() { try? FileManager.default.removeItem(at: u) }
+    }
 
     /// いちばん早い終わり
     static var earliestUntil: Date? { active().map(\.untilDate).min() }
@@ -90,10 +152,13 @@ enum AppUnlocks {
         if targets.isEmpty {
             error = "ロックされているアプリを1つ以上選んでください。"
         } else {
-            let total = allowed.applicationTokens.count + current.union(targets).count
+            // 許可アプリに入っているものは二重に数えない
+            let extra = current.union(targets).subtracting(allowed.applicationTokens)
+            let total = allowed.applicationTokens.count + extra.count
             if total > limit {
+                let curOnly = current.subtracting(allowed.applicationTokens)
                 error = "ロックの例外にできるのは許可アプリと合わせて\(limit)個までです"
-                    + "（許可アプリ \(allowed.applicationTokens.count)個・個別に解除中 \(current.count)個・今回 \(targets.subtracting(current).count)個で \(total)個）。"
+                    + "（許可アプリ \(allowed.applicationTokens.count)個・個別に解除中 \(curOnly.count)個・今回 \(extra.subtracting(curOnly).count)個で \(total)個）。"
                     + "選ぶアプリを減らしてください。"
             }
         }
@@ -102,15 +167,9 @@ enum AppUnlocks {
 
     /// 足す（同じアプリが解除中なら長い方の期限）
     static func add(_ tokens: Set<ApplicationToken>, until: Date, recordId: String) {
-        var a = all
-        for t in tokens {
-            if let i = a.firstIndex(where: { $0.token == t }) {
-                if a[i].untilDate < until { a[i].until = ISO.string(until); a[i].recordId = recordId }
-            } else {
-                a.append(AppUnlock(token: t, until: ISO.string(until), recordId: recordId))
-            }
-        }
-        all = a
+        // 1アプリ1ファイルを作るだけ（同じアプリの古いファイルは all が長い方を取り、期限で prune が消す）
+        let d = dir
+        for t in tokens { write(AppUnlock(token: t, until: ISO.string(until), recordId: recordId), in: d) }
     }
 }
 
