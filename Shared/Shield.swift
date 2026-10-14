@@ -88,11 +88,14 @@ enum Shield {
         if let until, !s.locked, until > now {
             // サーバーの時間解除で上書きする
             if let e = setUnlock(until: until, source: "server") { errors.append(e) }
-        } else if s.locked || until != nil {
-            // 新しいロックの指示（または期限切れの時間解除）は、アプリでの時間解除も打ち消す
+        } else if s.locked {
+            // 新しいロックの指示は、アプリでの時間解除も打ち消す
+            clearUnlock()
+        } else if until != nil, Store.unlockSource == "server" {
+            // 期限切れのサーバーの時間解除: 手動ロックを立てるだけ。残っているのが古いサーバーの解除なら外す
             clearUnlock()
         }
-        // 無期限の解除（locked=false・期限なし）は手動ロックを外すだけ。アプリでの時間解除はそのまま
+        // 期限切れのサーバーの時間解除・無期限の解除（locked=false・期限なし）は、アプリでの時間解除を残す
         Store.appliedVersion = s.version
 
         let st = reconcile(route: route)

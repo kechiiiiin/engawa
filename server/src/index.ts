@@ -258,7 +258,8 @@ async function postUnlock(req: Request, env: Env) {
   if (minutes === null || minutes < 1 || minutes > 24 * 60) return json({ error: "minutes は 1〜1440 の整数" }, 400);
   const reason = typeof b.reason === "string" ? b.reason.trim() : "";
   if (reason.length === 0) return json({ error: "reason は必須" }, 400);
-  if (reason.length > 500) return json({ error: "reason は500字まで" }, 400);
+  // コードポイントで数える（端末の unicodeScalars.count と同じ。UTF-16 の length だと絵文字が2つに数えられる）
+  if ([...reason].length > 2000) return json({ error: "reason は2000字まで" }, 400);
   const until = typeof b.until === "string" && !Number.isNaN(Date.parse(b.until))
     ? b.until
     : new Date(Date.parse(at) + minutes * 60_000).toISOString();
@@ -284,13 +285,15 @@ async function postUnlock(req: Request, env: Env) {
 }
 
 async function getUnlocks(url: URL, env: Env) {
+  // 時刻は文字列でなく julianday で比べる（"…00.000Z" と "…00Z" の書き方の違いで漏れないように）
   const since = url.searchParams.get("since") ?? "1970-01-01T00:00:00Z";
+  if (Number.isNaN(Date.parse(since))) return json({ error: "since は ISO 8601 の時刻" }, 400);
   const n = Math.trunc(Number(url.searchParams.get("limit") ?? "200"));
   const limit = Math.min(Math.max(1, Number.isFinite(n) ? n : 200), 5000);
   const { results } = await env.DB.prepare(
     `SELECT id, at, received_at AS receivedAt, minutes, until, reason, lock_reason AS lockReason,
             used_minutes AS usedMinutes, quota_minutes AS quotaMinutes, source
-     FROM unlocks WHERE at >= ? ORDER BY at DESC LIMIT ?`,
+     FROM unlocks WHERE julianday(at) >= julianday(?) ORDER BY julianday(at) DESC LIMIT ?`,
   )
     .bind(since, limit)
     .all<Record<string, unknown>>();

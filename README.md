@@ -22,7 +22,7 @@
 |---|---|
 | `App/` | 本体 `Engawa`（認可・許可アプリの選択・前面で同期 R1・サイレントプッシュ R2・経路の切り替え・試験2 の登録・記録の表示と送信） |
 | `MonitorExt/` | DeviceActivityMonitor 拡張（全コールバックで目覚めを記録・R4／R5 でサーバーを見に行く・時間解除の再ロック） |
-| `ShieldConfigExt/` | ロック画面の文言（`ideas.json` か App Group の上書きからランダム） |
+| `ShieldConfigExt/` | ロック画面の文言（App Group の `ideas.json` からランダム。無ければ `Shared/Ideas.swift` の既定の10件、空なら固定文） |
 | `ShieldActionExt/` | 「閉じる」ボタン（記録して `.close`） |
 | `PushExt/` | Notification Service 拡張（R3: alert プッシュのペイロードの state を shield に反映し、成否を本文に足す） |
 | `Shared/` | 全ターゲット共通（App Group のファイル置き場・記録・同期待ちの通信・shield の掛け外し・監視の登録） |

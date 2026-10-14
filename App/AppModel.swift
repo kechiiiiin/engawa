@@ -96,7 +96,7 @@ final class AppModel: ObservableObject {
     // MARK: 解除（理由＋時間）
 
     func unlock(minutes: Int, reason: String) {
-        let r = String(reason.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Unlocks.reasonLimit))
+        let r = Unlocks.normalizeReason(reason)
         guard !r.isEmpty, Unlocks.minuteChoices.contains(minutes) else { return }
         Shield.unlockFromApp(minutes: minutes, reason: r)
         refreshHome()

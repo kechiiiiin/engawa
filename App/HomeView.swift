@@ -167,7 +167,7 @@ struct UnlockView: View {
                     TextField("例: 地図で道を調べる", text: $reason, axis: .vertical)
                         .lineLimit(2...5)
                         .focused($focused)
-                    if reason.count > Unlocks.reasonLimit {
+                    if Unlocks.reasonLength(reason) > Unlocks.reasonLimit {
                         Text("\(Unlocks.reasonLimit)字までにしてください").font(.footnote).foregroundStyle(.red)
                     }
                 } header: {
@@ -188,7 +188,7 @@ struct UnlockView: View {
                     } label: {
                         Text("\(minutes)分 解除する").frame(maxWidth: .infinity)
                     }
-                    .disabled(trimmed.isEmpty || reason.count > Unlocks.reasonLimit)
+                    .disabled(trimmed.isEmpty || Unlocks.reasonLength(reason) > Unlocks.reasonLimit)
                 }
             }
             .navigationTitle("解除する")

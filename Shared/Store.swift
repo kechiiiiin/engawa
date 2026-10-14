@@ -285,10 +285,11 @@ enum Log {
     @discardableResult
     static func flush(timeout: TimeInterval = 4) -> String {
         let me = LogRecord.currentProc
-        // 解除の記録（理由つき）を先に送る（送れなかったものの記録が下の flush に乗るように）
-        let unlocks = "解除: \(Unlocks.flush(timeout: timeout))"
+        // 解除の記録（理由つき）は本体だけが送る（拡張の短い持ち時間を使わない）。
+        // 先に送るのは、送れなかったことの記録が下の flush に乗るように
+        let unlocks = me == "app" ? ["解除: \(Unlocks.flush(timeout: timeout))"] : []
         let procs = me == "app" ? ["app", "shieldConfig", "shieldAction"] : [me]
-        return ([unlocks] + procs.map { p in "\(p): \(flush(proc: p, timeout: timeout))" }).joined(separator: " / ")
+        return (unlocks + procs.map { p in "\(p): \(flush(proc: p, timeout: timeout))" }).joined(separator: " / ")
     }
 
     private static func flush(proc: String, timeout: TimeInterval) -> String {

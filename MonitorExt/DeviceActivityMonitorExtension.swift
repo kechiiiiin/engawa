@@ -26,7 +26,10 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
     override func intervalDidEnd(for activity: DeviceActivityName) {
         super.intervalDidEnd(for: activity)
         wake("intervalDidEnd", activity)
-        if activity == .pollA || activity == .pollB {
+        if activity == .daily {
+            // 期間の終わり（リセットの1分前）。三層で決め直す（期限切れの時間解除の自己修復も兼ねる）
+            Shield.reconcile(route: "dailyEnd")
+        } else if activity == .pollA || activity == .pollB {
             // 次の分を登録し直す（15分空けて次の間隔。start/end と warning で約5〜10分おきに起きる）
             if Store.routes.poll {
                 let err = Wake.armPoll(activity, start: Date().addingTimeInterval(Wake.interval))

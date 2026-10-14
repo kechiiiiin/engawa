@@ -83,14 +83,14 @@ enum Quota {
         let hasAllowed = !(sel.applicationTokens.isEmpty && sel.webDomainTokens.isEmpty && sel.categoryTokens.isEmpty)
         switch s.countMode {
         case .inclusive:
-            // 枠の少し先まで段階（表示用・目覚まし用）＋ちょうど枠の quota（ロック用）
-            for k in stride(from: step, through: min(quota + 60, 1435), by: step) {
+            // 枠の少し先まで細かい段階（表示用・目覚まし用）＋ちょうど枠の quota（ロック用）
+            for k in allThresholds(step: step, fineUntil: quota + 60) {
                 ev[allEvent(k)] = event(threshold: k)
             }
             ev[quotaEvent] = event(threshold: quota)
         case .excludeAllowed:
-            // 差し引くので、all は許可アプリの分だけ先まで要る（4時間ぶん余裕）
-            for k in stride(from: step, through: min(quota + 240, 1435), by: step) {
+            // 差し引くので、all は許可アプリの分だけ先まで細かく要る（4時間ぶん余裕）
+            for k in allThresholds(step: step, fineUntil: quota + 240) {
                 ev[allEvent(k)] = event(threshold: k)
             }
             // 許可アプリが空のときは登録しない（3つとも空だと「すべて」になってしまう）
@@ -105,6 +105,17 @@ enum Quota {
             }
         }
         return ev
+    }
+
+    /// all-k の段: fineUntil までは step 刻み、その先は 1435分まで30分刻み。
+    /// 枠を越えて（時間解除で）使い続けても MonitorExt が起き続け、relock の自己修復（reconcile）が止まらないように
+    static func allThresholds(step: Int, fineUntil: Int) -> [Int] {
+        let limit = 1435
+        let fineEnd = min(fineUntil, limit)
+        var ks = Array(stride(from: step, through: fineEnd, by: step))
+        var k = ((ks.last ?? 0) / 30 + 1) * 30   // 細かい段の次の30分区切りから
+        while k <= limit { ks.append(k); k += 30 }
+        return ks
     }
 
     /// すべての使用（3つとも空）。途中で登録し直しても今日の分から数えるよう includesPastActivity
@@ -145,10 +156,16 @@ enum Quota {
         Store.setCodable("usage.json", v)
     }
 
-    /// intervalDidStart(daily): 新しい期間を0から
+    /// intervalDidStart(daily): 保存済みの期間が今の期間と違うときだけ0から（同じ期間の再登録・
+    /// 重複の呼び出しで今日の使用時間を消さない）。リセット時刻の少し前に呼ばれても新しい期間を指すよう +120秒で見る
     static func startNewPeriod() {
-        saveUsage(UsageState(periodStart: ISO.string(periodStart())))
-        Log.add(kind: "quotaReset", route: "daily", detail: "periodStart=\(ISO.string(periodStart()))")
+        let start = ISO.string(periodStart(Date().addingTimeInterval(120)))
+        if let u = Store.codable("usage.json", as: UsageState.self), u.periodStart == start {
+            Log.add(kind: "quotaReset", route: "daily", ok: true, detail: "同じ期間なので0にしない periodStart=\(start)")
+            return
+        }
+        saveUsage(UsageState(periodStart: start))
+        Log.add(kind: "quotaReset", route: "daily", detail: "periodStart=\(start)")
     }
 
     /// 段階イベント・quota の発火を記録する。早発火（期間の経過時間より大きい値）は記録して無視

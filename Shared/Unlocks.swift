@@ -1,7 +1,7 @@
 import Foundation
 
 // 縁側アプリからの時間解除の記録（理由つき）。サーバーの POST /unlocks へ送る。
-// 届かなかったら App Group の pending-unlocks/ に1件1ファイルで残し、次の Log.flush で送り直す。
+// 届かなかったら App Group の pending-unlocks/ に1件1ファイルで残し、次に本体が Log.flush するときに送り直す。
 // サーバーは id で重複を捨てるので、2つのプロセスが同じものを送っても害はない。
 
 struct UnlockRecord: Codable, Equatable {
@@ -10,7 +10,7 @@ struct UnlockRecord: Codable, Equatable {
     var at: String
     var minutes: Int
     var until: String
-    /// 理由（必須・500字まで）
+    /// 理由（必須・2000字まで。コードポイントで数える）
     var reason: String
     /// そのときのロックの理由（none／manual／quota／manualAndQuota）
     var lockReason: String
@@ -20,7 +20,18 @@ struct UnlockRecord: Codable, Equatable {
 }
 
 enum Unlocks {
-    static let reasonLimit = 500
+    /// 理由の上限（Unicode のコードポイントで数える。サーバーの [...reason].length と同じ）
+    static let reasonLimit = 2000
+
+    static func reasonLength(_ s: String) -> Int { s.unicodeScalars.count }
+
+    /// 前後の空白を除き、上限で切る（コードポイント単位）
+    static func normalizeReason(_ s: String) -> String {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        var out = String.UnicodeScalarView()
+        out.append(contentsOf: t.unicodeScalars.prefix(reasonLimit))
+        return String(out)
+    }
     static let minuteChoices = [15, 30, 60]
 
     static var dir: URL {
@@ -43,7 +54,8 @@ enum Unlocks {
         (try? FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".json") }.count) ?? 0
     }
 
-    /// 溜まっている解除の記録を送る。2xx か 400（直しようがない）なら消す。それ以外は次に持ち越し
+    /// 溜まっている解除の記録を送る。2xx か 400（直しようがない）なら消す。
+    /// それ以外は次に持ち越し、最初の失敗で打ち切る（つながらないときに1件ごとに待たない）
     @discardableResult
     static func flush(timeout: TimeInterval = 4) -> String {
         let fm = FileManager.default
@@ -61,12 +73,13 @@ enum Unlocks {
                 try? fm.removeItem(at: u)
                 Log.add(kind: "unlockSend", ok: false, error: "HTTP 400（捨てた）", detail: n)
             case .success(let (code, _)):
-                kept += 1
-                Log.add(kind: "unlockSend", ok: false, error: "HTTP \(code)（持ち越し）", detail: n)
+                kept = names.count - sent
+                Log.add(kind: "unlockSend", ok: false, error: "HTTP \(code)（以降 \(kept) 件を持ち越し）", detail: n)
             case .failure(let e):
-                kept += 1
-                Log.add(kind: "unlockSend", ok: false, error: "\(e.localizedDescription)（持ち越し）", detail: n)
+                kept = names.count - sent
+                Log.add(kind: "unlockSend", ok: false, error: "\(e.localizedDescription)（以降 \(kept) 件を持ち越し）", detail: n)
             }
+            if kept > 0 { break }
         }
         return "\(sent) 件送った" + (kept > 0 ? "・\(kept) 件持ち越し" : "")
     }
