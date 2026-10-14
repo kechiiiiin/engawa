@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>縁側 画面モック</title>
+<style>
+  :root{
+    /* 地 */
+    --paper:   #F4ECDF;   /* 生成り */
+    --paper-2: #EDE2D0;   /* 一段沈んだ生成り（区切り・トラック） */
+    --card:    #FBF7F0;   /* 障子紙 */
+    --line:    #E2D5C0;   /* 細い罫 */
+    /* 文字 */
+    --ink:     #3B2F25;   /* 焦げ茶の墨 */
+    --ink-2:   #7B6A57;   /* 二次 */
+    --ink-3:   #A8977F;   /* 三次 */
+    /* 差し色（アイコンから） */
+    --wood:    #7A4E2D;   /* 縁側の板 */
+    --wood-d:  #5E3B21;
+    --gold:    #D6A048;   /* 午後の光 */
+    --field:   #6F8F47;   /* 田んぼ */
+    --dusk:    #8C5A3C;   /* ロック時の夕色 */
+
+    --mincho: "Hiragino Mincho ProN","YuMincho","Yu Mincho","Noto Serif JP",serif;
+    --gothic: -apple-system,"SF Pro Text","Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:#E7E2DA}
+  body{
+    font-family:var(--gothic);
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+    padding:56px 64px 48px;
+    width:max-content;
+  }
+  .stage{display:flex;gap:56px;align-items:flex-start}
+  figure{display:flex;flex-direction:column;align-items:center;gap:22px}
+  figcaption{font-family:var(--gothic);font-size:13px;letter-spacing:.06em;color:#8A8177}
+  figcaption b{font-weight:600;color:#5C544B;margin-right:.6em}
+
+  /* 端末の枠 */
+  .phone{
+    width:390px;height:844px;border-radius:52px;position:relative;overflow:hidden;
+    background:var(--paper);
+    box-shadow:0 0 0 10px #1C1A18, 0 0 0 11px #3A3633, 0 30px 60px -20px rgba(40,30,20,.45);
+  }
+  .island{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:124px;height:36px;border-radius:20px;background:#000;z-index:50}
+  .status{position:absolute;top:0;left:0;right:0;height:54px;display:flex;justify-content:space-between;align-items:center;padding:4px 30px 0 46px;z-index:40;font-family:var(--gothic);font-weight:600;font-size:16px;color:var(--ink)}
+  .status .sys{display:flex;gap:6px;align-items:center}
+  .home-ind{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:134px;height:5px;border-radius:3px;background:rgba(59,47,37,.85);z-index:60}
+
+  /* 紙の地（ごく薄いノイズ） */
+  .paper-tex::before{
+    content:"";position:absolute;inset:0;pointer-events:none;z-index:0;opacity:.35;mix-blend-mode:multiply;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .55  0 0 0 0 .45  0 0 0 0 .32  0 0 0 .10 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+
+  /* ===== ホーム ===== */
+  .hero{position:absolute;top:0;left:0;right:0;height:392px;z-index:1;overflow:hidden}
+  .hero img{position:absolute;left:-6%;top:-14px;width:128%;height:auto;display:block}
+  .hero::after{ /* 下を生成りに溶かす */
+    content:"";position:absolute;inset:0;
+    background:linear-gradient(to bottom, rgba(244,236,223,0) 58%, rgba(244,236,223,.6) 78%, rgba(244,236,223,.94) 91%, var(--paper) 100%);
+  }
+  .hero .scrim{position:absolute;left:0;right:0;top:0;height:120px;z-index:2;background:linear-gradient(to bottom,rgba(40,24,14,.38),rgba(40,24,14,0))}
+  .hero.locked img{filter:saturate(.8) brightness(.92)}
+  .hero.locked::before{ /* 夕暮れの色を薄くかける */
+    content:"";position:absolute;inset:0;z-index:1;
+    mix-blend-mode:multiply;background:linear-gradient(to bottom, #6E5468 0%, #B9876A 45%, #E2B48C 70%, rgba(244,236,223,0) 92%);
+  }
+  .gear{
+    position:absolute;top:58px;right:18px;width:40px;height:40px;border-radius:20px;z-index:30;
+    display:grid;place-items:center;
+    background:rgba(251,247,240,.55);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    box-shadow:0 1px 0 rgba(255,255,255,.6) inset, 0 2px 8px rgba(60,40,20,.12);
+  }
+  .gear svg{width:21px;height:21px;stroke:var(--ink);opacity:.85}
+
+  .home-body{position:absolute;left:0;right:0;top:330px;bottom:0;z-index:5;padding:0 24px}
+  .eyebrow{font-family:var(--gothic);font-size:13px;font-weight:500;letter-spacing:.08em;color:var(--ink-2)}
+  .state{display:flex;align-items:baseline;gap:12px;margin-top:6px}
+  .state h1{font-family:var(--mincho);font-weight:600;font-size:38px;letter-spacing:.06em;line-height:1.15}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--field);box-shadow:0 0 0 4px rgba(111,143,71,.16);transform:translateY(-8px)}
+  .dot.lock{background:var(--dusk);box-shadow:0 0 0 4px rgba(140,90,60,.16)}
+  .sub{margin-top:8px;font-size:15px;color:var(--ink-2);line-height:1.5}
+  .sub strong{font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+
+  .usage{margin-top:20px}
+  .usage-row{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+  .usage-row .big{font-family:var(--gothic);font-size:15px;color:var(--ink);font-weight:600}
+  .track{margin-top:9px;height:6px;border-radius:3px;background:var(--paper-2);overflow:hidden;box-shadow:inset 0 1px 1px rgba(80,60,40,.08)}
+  .fill{height:100%;border-radius:3px;background:linear-gradient(90deg,#C48A3A,var(--gold))}
+  .fill.full{background:linear-gradient(90deg,#9A6A47,var(--dusk))}
+
+  .todo{
+    margin-top:20px;background:var(--card);border-radius:18px;padding:16px 18px 14px;
+    box-shadow:0 1px 0 rgba(255,255,255,.8) inset, 0 0 0 .5px rgba(122,78,45,.10), 0 6px 18px -8px rgba(90,60,30,.18);
+  }
+  .todo .lbl{font-size:12px;letter-spacing:.12em;color:var(--ink-2);font-weight:600}
+  .todo .what{font-family:var(--mincho);font-size:22px;font-weight:600;margin-top:6px;letter-spacing:.04em}
+  .todo .foot{display:flex;justify-content:flex-end;margin-top:4px}
+  .link{display:inline-flex;align-items:center;gap:5px;font-size:14px;color:var(--wood);font-weight:500;padding:6px 0 2px}
+  .link svg{width:15px;height:15px;stroke:var(--wood)}
+
+  .todo.lead{padding:20px 20px 16px}
+  .todo.lead .what{font-size:28px;margin-top:8px}
+  .todo.lead .hint{font-size:13px;color:var(--ink-2);margin-top:6px;line-height:1.6}
+
+  .actions{position:absolute;left:24px;right:24px;bottom:42px;display:flex;flex-direction:column;gap:10px}
+  .btn{
+    height:54px;border-radius:16px;display:flex;align-items:center;justify-content:center;
+    font-family:var(--gothic);font-size:17px;font-weight:600;letter-spacing:.06em;
+  }
+  .btn.primary{background:linear-gradient(to bottom,#865834,var(--wood-d));color:#FBF4E8;box-shadow:0 1px 0 rgba(255,255,255,.18) inset, 0 6px 14px -6px rgba(94,59,33,.55)}
+  .btn.secondary{background:rgba(122,78,45,.07);color:var(--wood-d);box-shadow:inset 0 0 0 1px rgba(122,78,45,.16)}
+  .btn.plain{height:44px;color:var(--wood);font-weight:500;font-size:16px}
+
+  /* ===== 解除シート ===== */
+  .dim{position:absolute;inset:0;background:rgba(30,20,12,.38);z-index:20}
+  .behind{transform:scale(.92);transform-origin:50% 0;border-radius:40px;overflow:hidden;position:absolute;inset:0;top:12px;filter:brightness(.92)}
+  .sheet{
+    position:absolute;left:0;right:0;bottom:0;top:262px;z-index:30;background:var(--paper);
+    border-radius:28px 28px 0 0;padding:10px 24px 0;overflow:hidden;
+    box-shadow:0 -10px 30px rgba(30,20,12,.18);
+  }
+  .grab{width:38px;height:5px;border-radius:3px;background:rgba(59,47,37,.22);margin:0 auto 18px}
+  .sheet-head{display:flex;justify-content:space-between;align-items:center}
+  .sheet-head h2{font-family:var(--mincho);font-size:24px;font-weight:600;letter-spacing:.08em}
+  .close{width:30px;height:30px;border-radius:15px;background:var(--paper-2);display:grid;place-items:center}
+  .close svg{width:12px;height:12px;stroke:var(--ink-2)}
+  .sheet .lead{margin-top:6px;font-size:14px;color:var(--ink-2);line-height:1.6}
+  .field-lbl{margin-top:22px;font-size:13px;font-weight:600;color:var(--ink-2);letter-spacing:.1em;display:flex;justify-content:space-between}
+  .field-lbl em{font-style:normal;font-weight:500;color:var(--ink-3);letter-spacing:.04em}
+  .textarea{
+    margin-top:8px;min-height:116px;border-radius:14px;background:var(--card);padding:14px 16px;
+    font-size:17px;line-height:1.6;color:var(--ink);
+    box-shadow:inset 0 0 0 1px rgba(122,78,45,.14);
+  }
+  .caret{display:inline-block;width:2px;height:20px;background:var(--wood);vertical-align:-4px;margin-left:1px}
+  .seg{margin-top:8px;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px;border-radius:14px;background:var(--paper-2)}
+  .seg div{height:44px;border-radius:10px;display:flex;align-items:baseline;justify-content:center;padding-top:11px;font-size:17px;font-weight:600;color:var(--ink-2);font-variant-numeric:tabular-nums}
+  .seg div small{font-size:12px;font-weight:500;margin-left:2px}
+  .seg .on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(60,40,20,.14),0 0 0 .5px rgba(122,78,45,.12)}
+  .sheet .actions{bottom:42px}
+
+  /* ===== 設定 ===== */
+  .nav{position:absolute;top:54px;left:0;right:0;height:44px;z-index:5}
+  .settings{position:absolute;top:54px;left:0;right:0;bottom:0;padding:0 0 40px;z-index:2;overflow:hidden}
+  .big-title{font-family:var(--mincho);font-size:32px;font-weight:600;letter-spacing:.08em;padding:44px 20px 6px}
+  .band{height:3px;margin:0 20px 6px;border-radius:2px;background:linear-gradient(90deg,var(--gold),rgba(214,160,72,0) 60%);opacity:.7}
+  .sec{margin-top:20px}
+  .sec-h{padding:0 36px 7px;font-size:13px;color:var(--ink-2);letter-spacing:.1em;font-weight:600}
+  .group{margin:0 20px;background:var(--card);border-radius:14px;overflow:hidden;box-shadow:0 0 0 .5px rgba(122,78,45,.10),0 3px 10px -6px rgba(90,60,30,.15)}
+  .row{display:flex;align-items:center;min-height:46px;padding:0 16px;position:relative;font-size:16px}
+  .row + .row::before{content:"";position:absolute;top:0;right:0;left:16px;height:.5px;background:var(--line)}
+  .row.ic + .row::before, .row.ic + .row.ic::before{left:58px}
+  .row .val{margin-left:auto;color:var(--ink-2);font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:8px}
+  .chev{width:8px;height:13px;stroke:var(--ink-3)}
+  .app{width:30px;height:30px;border-radius:7px;margin-right:12px;display:grid;place-items:center;flex:none;box-shadow:inset 0 0 0 .5px rgba(0,0,0,.08)}
+  .app svg{width:18px;height:18px}
+  .row.add{color:var(--wood);font-weight:500}
+  .row .todo-t{font-family:var(--mincho);font-size:16px;letter-spacing:.03em}
+  .muted{color:var(--ink-2)}
+  .foot-note{text-align:center;margin-top:22px;font-size:12px;color:var(--ink-3);letter-spacing:.1em}
+</style>
+</head>
+<body>
+<div class="stage">
+
+<!-- ========== 1. ホーム（使える） ========== -->
+<figure>
+<div class="phone paper-tex">
+  <div class="island"></div>
+  <div class="status" style="color:#FBF4E8"><span>9:41</span><span class="sys">
+    <svg width="18" height="12" viewBox="0 0 18 12"><g fill="#FBF4E8"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></g></svg>
+    <svg width="26" height="12" viewBox="0 0 26 12"><rect x=".5" y=".5" width="22" height="11" rx="3.5" fill="none" stroke="#FBF4E8" opacity=".6"/><rect x="2" y="2" width="15" height="8" rx="2" fill="#FBF4E8"/><rect x="23.5" y="4" width="1.6" height="4" rx=".8" fill="#FBF4E8" opacity=".6"/></svg>
+  </span></div>
+  <div class="hero"><img src="../icon/chatgpt/v1.png" alt=""><div class="scrim"></div></div>
+  <div class="gear"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+
+  <div class="home-body">
+    <div class="eyebrow">10月14日 火曜日</div>
+    <div class="state"><h1>使えます</h1><span class="dot"></span></div>
+    <div class="sub">今日はあと <strong>1時間12分</strong></div>
+
+    <div class="usage">
+      <div class="usage-row"><span>使った <span class="big">48分</span></span><span>枠 2時間</span></div>
+      <div class="track"><div class="fill" style="width:40%"></div></div>
+    </div>
+
+    <div class="todo">
+      <div class="lbl">代わりにやりたいこと</div>
+      <div class="what">縁側でお茶を淹れる</div>
+      <div class="foot"><span class="link"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>ほかの案</span></div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <div class="btn secondary">アプリを選んで解除</div>
+    <div class="btn primary">いまからロック</div>
+  </div>
+  <div class="home-ind"></div>
+</div>
+<figcaption><b>1</b>ホーム — 使える</figcaption>
+</figure>
+
+<!-- ========== 2. ホーム（ロック中・枠切れ） ========== -->
+<figure>
+<div class="phone paper-tex" id="locked">
+  <div class="island"></div>
+  <div class="status" style="color:#FBF4E8"><span>9:41</span><span class="sys">
+    <svg width="18" height="12" viewBox="0 0 18 12"><g fill="#FBF4E8"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></g></svg>
+    <svg width="26" height="12" viewBox="0 0 26 12"><rect x=".5" y=".5" width="22" height="11" rx="3.5" fill="none" stroke="#FBF4E8" opacity=".6"/><rect x="2" y="2" width="15" height="8" rx="2" fill="#FBF4E8"/><rect x="23.5" y="4" width="1.6" height="4" rx=".8" fill="#FBF4E8" opacity=".6"/></svg>
+  </span></div>
+  <div class="hero locked"><img src="../icon/chatgpt/v1.png" alt=""></div>
+  <div class="gear"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+
+  <div class="home-body">
+    <div class="eyebrow">10月14日 火曜日</div>
+    <div class="state"><h1>ロック中</h1><span class="dot lock"></span></div>
+    <div class="sub">今日の枠を使い切りました。<br>明日 <strong>4:00</strong> にもどります。</div>
+
+    <div class="usage">
+      <div class="usage-row"><span>使った <span class="big">2時間</span></span><span>枠 2時間</span></div>
+      <div class="track"><div class="fill full" style="width:100%"></div></div>
+    </div>
+
+    <div class="todo lead">
+      <div class="lbl">代わりにやりたいこと</div>
+      <div class="what">外を5分歩く</div>
+      <div class="foot"><span class="link"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>ほかの案</span></div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <div class="btn secondary">アプリを選んで解除</div>
+    <div class="btn primary">解除する</div>
+  </div>
+  <div class="home-ind"></div>
+</div>
+<figcaption><b>2</b>ホーム — ロック中（枠切れ）</figcaption>
+</figure>
+
+<!-- ========== 3. 解除のシート ========== -->
+<figure>
+<div class="phone" style="background:#000">
+  <div class="island"></div>
+  <div class="status" style="color:#FBF4E8"><span>9:41</span><span class="sys">
+    <svg width="18" height="12" viewBox="0 0 18 12"><g fill="#FBF4E8"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></g></svg>
+    <svg width="26" height="12" viewBox="0 0 26 12"><rect x=".5" y=".5" width="22" height="11" rx="3.5" fill="none" stroke="#FBF4E8" opacity=".6"/><rect x="2" y="2" width="15" height="8" rx="2" fill="#FBF4E8"/><rect x="23.5" y="4" width="1.6" height="4" rx=".8" fill="#FBF4E8" opacity=".6"/></svg>
+  </span></div>
+  <div class="behind paper-tex" style="background:var(--paper)">
+    <div class="hero locked"><img src="../icon/chatgpt/v1.png" alt=""></div>
+    <div class="home-body">
+      <div class="eyebrow">10月14日 火曜日</div>
+      <div class="state"><h1>ロック中</h1><span class="dot lock"></span></div>
+      <div class="sub">今日の枠を使い切りました。</div>
+    </div>
+    <div class="dim"></div>
+  </div>
+
+  <div class="sheet paper-tex">
+    <div class="grab"></div>
+    <div class="sheet-head"><h2>解除する</h2><div class="close"><svg viewBox="0 0 12 12" fill="none" stroke-width="1.8" stroke-linecap="round"><path d="M2 2l8 8M10 2l-8 8"/></svg></div></div>
+    <p class="lead">少しだけ開けますね。なにをしたいか、ひとこと残してください。</p>
+
+    <div class="field-lbl"><span>理由</span><em>必須</em></div>
+    <div class="textarea">家族からの連絡を見て、<br>返事をしたい<span class="caret"></span></div>
+
+    <div class="field-lbl"><span>時間</span></div>
+    <div class="seg">
+      <div>15<small>分</small></div>
+      <div class="on">30<small>分</small></div>
+      <div>60<small>分</small></div>
+    </div>
+
+    <div class="actions">
+      <div class="btn primary">30分 解除する</div>
+    </div>
+  </div>
+  <div class="home-ind"></div>
+</div>
+<figcaption><b>3</b>解除のシート</figcaption>
+</figure>
+
+<!-- ========== 4. 設定 ========== -->
+<figure>
+<div class="phone paper-tex">
+  <div class="island"></div>
+  <div class="status"><span>9:41</span><span class="sys">
+    <svg width="18" height="12" viewBox="0 0 18 12"><g fill="#3B2F25"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></g></svg>
+    <svg width="26" height="12" viewBox="0 0 26 12"><rect x=".5" y=".5" width="22" height="11" rx="3.5" fill="none" stroke="#3B2F25" opacity=".45"/><rect x="2" y="2" width="15" height="8" rx="2" fill="#3B2F25"/><rect x="23.5" y="4" width="1.6" height="4" rx=".8" fill="#3B2F25" opacity=".45"/></svg>
+  </span></div>
+
+  <div class="settings">
+    <div class="nav-bar" style="display:flex;justify-content:space-between;align-items:center;height:44px;padding:0 16px;position:absolute;top:0;left:0;right:0">
+      <span class="link" style="font-size:17px;gap:3px"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px"><path d="M15 5l-7 7 7 7"/></svg>ホーム</span>
+    </div>
+    <div class="big-title">設定</div>
+
+    <div class="sec">
+      <div class="sec-h">許可アプリ</div>
+      <div class="group">
+        <div class="row ic"><span class="app" style="background:#4CC764"><svg viewBox="0 0 24 24"><path fill="#fff" d="M12 4C7 4 3 7.2 3 11.2c0 3.6 3.2 6.5 7.5 7.1.3.1.7.2.8.5.1.2.1.6 0 .9l-.1.8c0 .2-.2.9.8.5s5.4-3.2 7.4-5.5C20.8 14 21 12.7 21 11.2 21 7.2 17 4 12 4z"/></svg></span>LINE</div>
+        <div class="row ic"><span class="app" style="background:#34C759"><svg viewBox="0 0 24 24"><path fill="#fff" d="M7.6 3.5c.5-.2 1 0 1.3.4l1.7 2.9c.3.5.2 1.1-.2 1.5l-1.3 1.1c.9 1.9 2.5 3.5 4.4 4.4l1.1-1.3c.4-.4 1-.5 1.5-.2l2.9 1.7c.4.3.6.8.4 1.3l-.7 2c-.3.8-1.1 1.3-2 1.2C10.6 18 6 13.4 5.4 7.3c-.1-.9.4-1.7 1.2-2z"/></svg></span>電話</div>
+        <div class="row ic"><span class="app" style="background:linear-gradient(135deg,#E9F3E4,#BFDDB2)"><svg viewBox="0 0 24 24"><path fill="#3A8EE6" d="M12 3a6 6 0 0 0-6 6c0 4.5 6 12 6 12s6-7.5 6-12a6 6 0 0 0-6-6zm0 8.3A2.3 2.3 0 1 1 12 6.7a2.3 2.3 0 0 1 0 4.6z"/></svg></span>マップ</div>
+                <div class="row add">アプリを選ぶ…</div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h">一日のきまり</div>
+      <div class="group">
+        <div class="row">1日の枠<span class="val">2時間<svg class="chev" viewBox="0 0 8 13" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 1.5l5 5-5 5"/></svg></span></div>
+        <div class="row">リセット時刻<span class="val">4:00<svg class="chev" viewBox="0 0 8 13" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 1.5l5 5-5 5"/></svg></span></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h">やりたいこと</div>
+      <div class="group">
+        <div class="row"><span class="todo-t">外を5分歩く</span></div>
+        <div class="row"><span class="todo-t">縁側でお茶を淹れる</span></div>
+        <div class="row"><span class="todo-t">本を10ページ読む</span></div>
+        <div class="row add">追加する</div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="group">
+        <div class="row muted">開発者向け<span class="val"><svg class="chev" viewBox="0 0 8 13" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 1.5l5 5-5 5"/></svg></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="home-ind"></div>
+</div>
+<figcaption><b>4</b>設定</figcaption>
+</figure>
+
+</div>
+</body>
+</html>

@@ -8,10 +8,16 @@ struct EngawaApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var model = AppModel()
 
+    init() {
+        Theme.applyNavigationAppearance()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(model)
+                .tint(Theme.wood)
+                // ダークモードは今回は作らない（2026-10-14）: Info.plist の UIUserInterfaceStyle=Light で固定
         }
     }
 }
@@ -21,23 +27,86 @@ struct RootView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
     private let timer = Timer.publish(every: 20, on: .main, in: .common).autoconnect()
+    @State private var path: [String] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             HomeView()
+                .navigationDestination(for: String.self) { _ in SettingsView() }
         }
         .onChange(of: scenePhase) { _, phase in
+            if isDemo { return }
             if phase == .active { model.syncOnForeground() }
         }
         .onReceive(timer) { _ in
+            if isDemo { return }
             if scenePhase == .active { model.tick() }
         }
         .onAppear {
+            #if DEBUG
+            if let mode = UIDemo.mode {
+                UIDemo.apply(mode, to: model)
+                if mode == "settings" { path = ["settings"] }
+                return
+            }
+            #endif
             model.refresh()
             if model.authStatus == .notDetermined { model.requestAuth() }  // 受け入れ条件9
         }
     }
+
+    private var isDemo: Bool {
+        #if DEBUG
+        return UIDemo.mode != nil
+        #else
+        return false
+        #endif
+    }
 }
+
+#if DEBUG
+/// 見た目の確認用（シミュレータでスクリーンショットを撮るため）。`-engawaUIDemo <mode>` で起動したときだけ、
+/// 表示用の状態を画面の model にだけ入れ、同期・見回り・許可の要求・通知の登録をしない（シミュレータ用）。
+/// mode: usable／locked／unlocked／selflock／sheet／apps／settings。Debug ビルドだけ
+enum UIDemo {
+    static let mode: String? = UserDefaults.standard.string(forKey: "engawaUIDemo")
+
+    static func apply(_ mode: String, to model: AppModel) {
+        let now = Date()
+        model.authStatus = .approved
+        var s = model.settings
+        s.quotaMinutes = 120
+        s.resetMinutes = 240
+        model.settings = s
+        model.unlockMessage = ""
+        model.appUnlocks = []
+        switch mode {
+        case "locked", "sheet", "apps":
+            model.usage = UsageState(periodStart: ISO.now, allMin: 120)
+            model.status = LockStatus(locked: true, reason: .quota, unlockUntil: nil, unlockSource: nil, updatedAt: ISO.now)
+            model.idea = Idea(title: "外を5分歩く", subtitle: "玄関を出て、角を一つ曲がって戻ってくるだけ。")
+        case "unlocked":
+            model.usage = UsageState(periodStart: ISO.now, allMin: 120)
+            model.status = LockStatus(locked: false, reason: .quota, unlockUntil: ISO.string(now.addingTimeInterval(12 * 60)),
+                                      unlockSource: "app", updatedAt: ISO.now)
+            model.idea = Idea(title: "縁側でお茶を淹れる", subtitle: "")
+        case "selflock":
+            model.usage = UsageState(periodStart: ISO.now, allMin: 48)
+            model.status = LockStatus(locked: true, reason: .selfLock, unlockUntil: nil, unlockSource: nil, updatedAt: ISO.now,
+                                      selfLockUntil: ISO.string(now.addingTimeInterval(3600)))
+            model.idea = Idea(title: "本を10ページ読む", subtitle: "読みかけの本を開いてみませんか。10ページで止めてもいい。")
+        default:   // usable／settings
+            model.usage = UsageState(periodStart: ISO.now, allMin: 48)
+            model.status = LockStatus(locked: false, reason: .none, unlockUntil: nil, unlockSource: nil, updatedAt: ISO.now)
+            model.idea = Idea(title: "縁側でお茶を淹れる", subtitle: "")
+        }
+        if mode == "settings" {
+            model.ideas = [Idea(title: "外を5分歩く", subtitle: ""), Idea(title: "縁側でお茶を淹れる", subtitle: ""),
+                           Idea(title: "本を10ページ読む", subtitle: "")]
+        }
+    }
+}
+#endif
 
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
 
@@ -50,6 +119,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         Log.add(kind: "launch", detail: Store.routes.summary)
         Shield.reconcile(route: "launch")
 
+        #if DEBUG
+        if UIDemo.mode != nil { return true }   // 見た目の確認だけ。通知の許可・APNs 登録はしない
+        #endif
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in

@@ -1,6 +1,7 @@
 *.xcodeproj/
 build/
 build-check/
+build-sim/
 DerivedData/
 .DS_Store
 xcuserdata/
