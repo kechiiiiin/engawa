@@ -47,6 +47,8 @@ struct DeveloperView: View {
                 LabeledContent("枠に数える分", value: "\(model.usedMinutes) 分")
                 LabeledContent("quota の発火", value: model.usage.quotaHitFor.map { "枠 \($0) 分で発火" } ?? "まだ")
                 LabeledContent("刻み・実際のリセット", value: "\(Quota.registeredStep.map(String.init) ?? "—") 分・\(AppSettings.clock(Quota.effectiveResetMinutes))")
+                LabeledContent("登録したイベント数", value: Quota.registeredEventCount.map { "\($0) 件" } ?? "—")
+                LabeledContent("使い切りの印", value: model.usage.exhaustedFor.map { "枠 \($0) 分で使い切り" } ?? "まだ")
                 Button("枠の監視（daily）を登録し直す") { model.armDaily() }
                 if !model.dailyResult.isEmpty { Text(model.dailyResult).font(.footnote) }
             }

@@ -196,7 +196,12 @@ enum Shield {
         // ロック中の使用を数えないための印（効き始め・外れ。LockSpans）。個別解除があるあいだは、
         // どのアプリの使用か分けられないので「外れている」として数える
         let active = AppUnlocks.active(now)
-        LockSpans.note(effective: now2 && shouldLock && active.isEmpty, usage: Quota.usage(now), now: now, route: route)
+        // 印の直前に読み直す（ここまでの間に別のプロセスが時間解除・個別解除を入れていたら、効いていない扱い）
+        let t = Date()
+        let effective = shouldLock && isShielded
+            && (Store.unlockUntil.map { $0 <= t } ?? true)
+            && AppUnlocks.active(t).isEmpty
+        LockSpans.note(effective: effective, usage: Quota.usage(t), route: route)
         // 期限の目覚まし（変わったときだけ登録し直す）
         Wake.armExpiryWakes(route: route)
         let st = LockStatus(locked: shouldLock, reason: reason, unlockUntil: until.map(ISO.string),

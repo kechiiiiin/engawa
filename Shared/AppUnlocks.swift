@@ -93,13 +93,15 @@ enum AppUnlocks {
         Set(active(now).map(\.token))
     }
 
-    /// 期限が now 以前のファイルを消す（読めないファイルも消す）。消したアプリの数
+    /// 期限が now 以前のファイルを消す（壊れたファイルも消す）。消したアプリの数
     @discardableResult
     static func prune(before now: Date) -> Int {
         let fm = FileManager.default
         var removed = Set<Data>()
         for u in files() {
-            guard let d = try? Data(contentsOf: u), let v = try? JSONDecoder().decode(AppUnlock.self, from: d) else {
+            // 読めない（データ保護がかかっている等）ものは消さずに飛ばす。読めて壊れているものだけ消す
+            guard let d = try? Data(contentsOf: u) else { continue }
+            guard let v = try? JSONDecoder().decode(AppUnlock.self, from: d) else {
                 try? fm.removeItem(at: u)
                 continue
             }
@@ -192,7 +194,7 @@ enum SelfLock {
             switch self {
             case .oneHour: return "1時間"
             case .twoHours: return "2時間"
-            case .untilReset: return "朝のリセットまで（\(AppSettings.clock(Quota.effectiveResetMinutes))）"
+            case .untilReset: return "朝のリセットまで"
             }
         }
     }

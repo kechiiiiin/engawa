@@ -39,6 +39,9 @@ struct UsageState: Codable, Equatable {
     var allowedMin = 0
     /// ちょうど枠の時間のイベント quota が発火したときの枠（inclusive 用。枠を変えたら効かない）
     var quotaHitFor: Int?
+    /// 期間内で一度でも枠を使い切ったときの枠（段の揺れ・ロック中の差し引きで used が下がっても使い切りのまま。
+    /// リセットで消え、枠を変えたら効かない。quotaHitFor と同じ扱い）
+    var exhaustedFor: Int?
     var updatedAt: String?
 }
 
@@ -82,9 +85,10 @@ enum Quota {
         case .inclusive:
             // 段階より正確な quota イベントを優先（ただし quota は全使用で発火するので、ロック中の分を
             // 差し引いているときは使えない）。段階の値でも超えていれば使い切り
-            return (u.quotaHitFor == s.quotaMinutes && locked == 0) || used >= s.quotaMinutes
+            return u.exhaustedFor == s.quotaMinutes
+                || (u.quotaHitFor == s.quotaMinutes && locked == 0) || used >= s.quotaMinutes
         case .excludeAllowed:
-            return used >= s.quotaMinutes
+            return u.exhaustedFor == s.quotaMinutes || used >= s.quotaMinutes
         }
     }
 
@@ -207,10 +211,15 @@ enum Quota {
         if raw == quotaEvent.rawValue { u.quotaHitFor = s.quotaMinutes }
         else if raw.hasPrefix("all-") { u.allMin = max(u.allMin, k) }
         else { u.allowedMin = max(u.allowedMin, k) }
-        saveUsage(u)
         let after = isExhausted(u, settings: s)
+        // 一度使い切ったら、この期間・この枠のあいだは使い切りのまま（段の揺れでロックが外れないように）
+        if after { u.exhaustedFor = s.quotaMinutes }
+        saveUsage(u)
+        // 枠+60分を越えた all-k の発火（細かい段を延ばした分が実機で届いているかを見る印）
+        let beyond = raw.hasPrefix("all-") && k > s.quotaMinutes + 60
         Log.add(kind: after && !before ? "quotaExhausted" : "quotaEvent", route: "daily", ok: true,
-                detail: "\(raw) used=\(usedMinutes(u, mode: s.countMode)) quota=\(s.quotaMinutes) mode=\(s.countMode.rawValue)")
+                detail: "\(raw) used=\(usedMinutes(u, mode: s.countMode)) locked=\(lockedMinutes(u, mode: s.countMode)) quota=\(s.quotaMinutes) mode=\(s.countMode.rawValue) step=\(registeredStep.map(String.init) ?? "-")"
+                    + (beyond ? " 枠+60超" : ""))
     }
 
     /// 試験2 の「E-all 到達でロック」用。今の枠で使い切った印を付ける
@@ -241,6 +250,7 @@ enum Quota {
                     try center.startMonitoring(.daily, during: sch, events: ev)
                     Store.setString("dailyResetMinutes", String(r))
                     Store.setString("dailyStep", String(step))
+                    Store.setString("dailyEvents", String(ev.count))
                     Log.add(kind: "arm", route: "daily", ok: errs.isEmpty, error: errs.isEmpty ? nil : errs.joined(separator: " / "),
                             detail: "\(reason) reset=\(AppSettings.clock(r)) step=\(step) events=\(ev.count) quota=\(s.quotaMinutes) mode=\(s.countMode.rawValue)")
                     return nil
@@ -260,6 +270,8 @@ enum Quota {
     }
 
     static var registeredStep: Int? { Int(Store.string("dailyStep") ?? "") }
+    /// 登録できた daily のイベント数（開発者向けに出す）
+    static var registeredEventCount: Int? { Int(Store.string("dailyEvents") ?? "") }
 
     private static func schedule(reset: Int) -> DeviceActivitySchedule {
         let end = (reset + 1439) % 1440   // リセットの1分前

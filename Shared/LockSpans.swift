@@ -12,7 +12,8 @@ import Foundation
 //     同じ向きの印が重なっても（競合で二重に書いても）、数えるときは「最初の始まり〜次の終わり」だけを使う
 //   - リセット時刻で0に戻る: 今の期間（periodStart）の印だけを数える。期間の頭でロックが効いていたかは
 //     前の期間の最後の印から決め、効いていれば 0 分から数え始める
-//   - 段階イベント（5分刻み）の値で測るので、境目で最大1刻みぶんずれる。区間ごとに下限0
+//   - 段階イベント（5分刻み）の値で測るので、境目で最大1刻みぶんずれる。差し引きの段は揺れる（許可アプリの段が
+//     先に進むと一時的に減って見える）ので、区間の差分は符号つきで足し、合計だけ下限0
 
 /// ロックの効き始め（locked=true）・外れ（false）の印
 struct LockMark: Codable, Equatable {
@@ -46,8 +47,10 @@ enum LockSpans {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: d.path)) ?? []
         return names.filter { $0.hasSuffix(".json") }.compactMap { n in
             let u = d.appendingPathComponent(n)
-            guard let data = try? Data(contentsOf: u), let m = try? JSONDecoder().decode(LockMark.self, from: data) else {
-                try? FileManager.default.removeItem(at: u)   // 読めないものは捨てる
+            // 読めない（端末のロックでデータ保護がかかっている等）ものは消さずに飛ばす。読めて壊れているものだけ捨てる
+            guard let data = try? Data(contentsOf: u) else { return nil }
+            guard let m = try? JSONDecoder().decode(LockMark.self, from: data) else {
+                try? FileManager.default.removeItem(at: u)
                 return nil
             }
             return (u, m)
@@ -58,12 +61,13 @@ enum LockSpans {
     /// 全部の印（古い順）
     static var marks: [LockMark] { entries().map(\.mark) }
 
-    /// reconcile から呼ぶ。effective（ロックが効いていて、時間解除も個別解除もない）が最後の印と違えば印を書く
-    static func note(effective: Bool, usage u: UsageState, now: Date = Date(), route: String) {
+    /// reconcile から呼ぶ。effective（ロックが効いていて、時間解除も個別解除もない）が最後の印と違えば印を書く。
+    /// effective と u は呼ぶ直前に読み直したもの。印の時刻はここで取り直す
+    static func note(effective: Bool, usage u: UsageState, route: String) {
         let es = entries()
         let last = es.last?.mark.locked ?? false
         guard last != effective else { return }
-        let m = LockMark(at: ISO.string(now), periodStart: u.periodStart, locked: effective,
+        let m = LockMark(at: ISO.string(Date()), periodStart: u.periodStart, locked: effective,
                          allMin: u.allMin, allowedMin: u.allowedMin, route: route)
         guard let data = try? JSONEncoder().encode(m) else { return }
         try? data.write(to: dir.appendingPathComponent("\(UUID().uuidString).json"),
@@ -101,13 +105,14 @@ enum LockSpans {
             }
         }
         if state { total += delta(from: from, to: (u.allMin, u.allowedMin), mode: mode) }
-        return max(0, total)
+        return max(0, total)   // 下限0は合計だけ（区間ごとには切らない）
     }
 
+    /// 区間の差分（符号つき。段の揺れで負になることもあり、次の区間で打ち消し合う）
     private static func delta(from a: (all: Int, allowed: Int), to b: (all: Int, allowed: Int), mode: CountMode) -> Int {
         switch mode {
-        case .inclusive: return max(0, b.all - a.all)
-        case .excludeAllowed: return max(0, (b.all - b.allowed) - (a.all - a.allowed))
+        case .inclusive: return b.all - a.all
+        case .excludeAllowed: return (b.all - b.allowed) - (a.all - a.allowed)
         }
     }
 }
