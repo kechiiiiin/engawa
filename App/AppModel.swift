@@ -16,6 +16,8 @@ final class AppModel: ObservableObject {
     @Published var idea: Idea = Ideas.pick().idea
     @Published var syncing = false
     @Published var unlockMessage: String = ""
+    /// 個別に解除中のアプリ（終わりの早い順）
+    @Published var appUnlocks: [AppUnlock] = AppUnlocks.active()
 
     // --- 開発者向け（試作の計測用） ---
     @Published var catsSelection: FamilyActivitySelection = Shield.loadCatsSelection()
@@ -35,11 +37,13 @@ final class AppModel: ObservableObject {
     var usedMinutes: Int { Quota.usedMinutes(usage, mode: settings.countMode) }
     var quotaExhausted: Bool { Quota.isExhausted(usage, settings: settings) }
     var unlockUntil: Date? { status.unlockUntil.flatMap(ISO.parse) }
+    var selfLockUntil: Date? { status.selfLockUntil.flatMap(ISO.parse) }
 
     /// ホームの表示を App Group から読み直す（軽い）
     func refreshHome() {
         authStatus = AuthorizationCenter.shared.authorizationStatus
         status = Shield.status
+        appUnlocks = AppUnlocks.active()
         usage = Quota.usage()
         settings = Store.settings
         shielded = Shield.isShielded
@@ -89,7 +93,11 @@ final class AppModel: ObservableObject {
 
     /// 前面にいるあいだの見回り（時間解除の期限が来たら掛け直す・残り時間の表示）
     func tick() {
-        if let u = Store.unlockUntil, u <= Date() { Shield.reconcile(route: "sync-fallback") }
+        let now = Date()
+        let expired = (Store.unlockUntil.map { $0 <= now } ?? false)
+            || (Store.selfLockUntil.map { $0 <= now } ?? false)
+            || AppUnlocks.all.contains { $0.untilDate <= now }
+        if expired { Shield.reconcile(route: "sync-fallback") }
         refreshHome()
     }
 
@@ -108,6 +116,51 @@ final class AppModel: ObservableObject {
                 self.unlockMessage = "\(minutes)分 解除しました（記録: \(sent)）"
                 self.refresh()
             }
+        }
+    }
+
+    // MARK: 個別解除（アプリを選ぶ＋理由＋時間）
+
+    /// 断るときは理由を返す（画面に出す）。済んだら nil
+    func unlockApps(_ pick: FamilyActivitySelection, minutes: Int, reason: String) -> String? {
+        let r = Unlocks.normalizeReason(reason)
+        guard !r.isEmpty else { return "理由を書いてください。" }
+        guard Unlocks.minuteChoices.contains(minutes) else { return "時間を選んでください。" }
+        switch Shield.unlockAppsFromApp(pick, minutes: minutes, reason: r) {
+        case .failure(let e):
+            return e.message
+        case .success(let rec):
+            refreshHome()
+            let n = rec.appCount ?? 0
+            unlockMessage = "\(n)個のアプリを\(minutes)分 解除しました"
+            DispatchQueue.global().async {
+                let sent = Unlocks.flush()
+                Log.flush()
+                DispatchQueue.main.async {
+                    self.unlockMessage = "\(n)個のアプリを\(minutes)分 解除しました（記録: \(sent)）"
+                    self.refresh()
+                }
+            }
+            return nil
+        }
+    }
+
+    // MARK: セルフロック（いまからロック）
+
+    func startSelfLock(_ choice: SelfLock.Choice) {
+        let until = choice.until()
+        let before = Store.selfLockUntil
+        Shield.startSelfLock(until: until, choice: choice.rawValue)
+        refreshHome()
+        let end = Store.selfLockUntil ?? until
+        if let before, before > until {
+            unlockMessage = "すでに \(LockReason.clock.string(from: before)) までセルフロック中です（短くはしません）"
+        } else {
+            unlockMessage = "\(LockReason.clock.string(from: end)) までロックしました"
+        }
+        DispatchQueue.global().async {
+            Log.flush()
+            DispatchQueue.main.async { self.refresh() }
         }
     }
 

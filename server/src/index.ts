@@ -8,6 +8,7 @@
 //   POST /events                      端末の記録をまとめて受け取る {events:[…]}
 //   GET  /events?since=ISO            記録を返す
 //   POST /unlocks                     縁側アプリからの時間解除（理由つき）を記録する（2026-10-14 足し算）
+//                                     kind: all（全体）| apps（アプリ個別・appCount つき）は同日さらに足し算。無ければ all
 //   GET  /unlocks?since=ISO&limit=N   解除の履歴（新しい順）
 //   GET  /                            最小のボタンページ（トークンは URL のフラグメント #<token> で渡す）
 
@@ -238,7 +239,12 @@ function parseMinutes(url: URL): number | null | "bad" {
   return n;
 }
 
-const LOCK_REASONS = new Set(["none", "manual", "quota", "manualAndQuota"]);
+const LOCK_REASONS = new Set([
+  "none", "manual", "quota", "manualAndQuota",
+  // セルフロック（端末だけの第4の層・2026-10-14 足し算）
+  "selfLock", "manualAndSelf", "quotaAndSelf", "manualAndQuotaAndSelf",
+]);
+const UNLOCK_KINDS = new Set(["all", "apps"]);
 
 // 縁側アプリからの時間解除の記録。状態（state）は変えない（解除は端末の中で済んでいる・記録だけ）
 async function postUnlock(req: Request, env: Env) {
@@ -266,19 +272,30 @@ async function postUnlock(req: Request, env: Env) {
   const lockReason = typeof b.lockReason === "string" && LOCK_REASONS.has(b.lockReason) ? b.lockReason : null;
   const usedMinutes = int(b.usedMinutes);
   const quotaMinutes = int(b.quotaMinutes);
+  // 種別（無ければ all・古いアプリはこれを送らない）。apps のときは対象のアプリ数が要る
+  if (b.kind !== undefined && b.kind !== null && !(typeof b.kind === "string" && UNLOCK_KINDS.has(b.kind))) {
+    return json({ error: "kind は all|apps" }, 400);
+  }
+  const kind = typeof b.kind === "string" ? b.kind : "all";
+  let appCount: number | null = null;
+  if (kind === "apps") {
+    appCount = int(b.appCount);
+    if (appCount === null || appCount < 1 || appCount > 50) return json({ error: "apps のとき appCount は 1〜50 の整数" }, 400);
+  }
 
   const res = await env.DB.prepare(
-    `INSERT OR IGNORE INTO unlocks (id, at, received_at, minutes, until, reason, lock_reason, used_minutes, quota_minutes, source)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'app')`,
+    `INSERT OR IGNORE INTO unlocks (id, at, received_at, minutes, until, reason, lock_reason, used_minutes, quota_minutes, source, kind, app_count)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'app', ?, ?)`,
   )
-    .bind(id, at, nowIso(), minutes, until, reason, lockReason, usedMinutes, quotaMinutes)
+    .bind(id, at, nowIso(), minutes, until, reason, lockReason, usedMinutes, quotaMinutes, kind, appCount)
     .run();
   const inserted = res.meta.changes ?? 0;
   if (inserted > 0) {
     await serverEvent(env, "deviceUnlock", {
       route: "app",
       ok: true,
-      detail: `minutes=${minutes} until=${until} lockReason=${lockReason ?? "?"}`,
+      detail: `minutes=${minutes} until=${until} lockReason=${lockReason ?? "?"} kind=${kind}`
+        + (appCount !== null ? ` apps=${appCount}` : ""),
     });
   }
   return json({ ok: true, inserted, id });
@@ -292,7 +309,8 @@ async function getUnlocks(url: URL, env: Env) {
   const limit = Math.min(Math.max(1, Number.isFinite(n) ? n : 200), 5000);
   const { results } = await env.DB.prepare(
     `SELECT id, at, received_at AS receivedAt, minutes, until, reason, lock_reason AS lockReason,
-            used_minutes AS usedMinutes, quota_minutes AS quotaMinutes, source
+            used_minutes AS usedMinutes, quota_minutes AS quotaMinutes, source,
+            COALESCE(kind, 'all') AS kind, app_count AS appCount
      FROM unlocks WHERE julianday(at) >= julianday(?) ORDER BY julianday(at) DESC LIMIT ?`,
   )
     .bind(since, limit)

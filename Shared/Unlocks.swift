@@ -17,6 +17,13 @@ struct UnlockRecord: Codable, Equatable {
     /// 今日の使用時間（推定・分）
     var usedMinutes: Int
     var quotaMinutes: Int
+    /// 種別（2026-10-14 足し算）: "all"＝全体の時間解除／"apps"＝アプリ個別の解除。古い記録には無い（＝all）
+    var kind: String? = nil
+    /// 個別解除の対象のアプリ数（アプリ名はトークンが不透明で読めないので、サーバーへは数だけ）
+    var appCount: Int? = nil
+
+    static let kindAll = "all"
+    static let kindApps = "apps"
 }
 
 enum Unlocks {
