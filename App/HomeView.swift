@@ -11,6 +11,8 @@ struct HomeView: View {
     @State private var showUnlock = false
     @State private var showAppUnlock = false
     @State private var showSelfLock = false
+    /// 見た目の確認用（-engawaUIDemo selflock-custom）: 時間の指定を開いた状態で出す
+    @State private var selfLockCustomDemo = false
 
     /// 景色に夕暮れを掛けるか（状態が変わると 0.8秒で移る）
     private var dusk: Bool { model.status.locked }
@@ -59,9 +61,11 @@ struct HomeView: View {
                 .environmentObject(model)
         }
         .sheet(isPresented: $showSelfLock) {
-            SelfLockSheet(title: selfLockTitle, message: selfLockMessage) { c in
+            SelfLockSheet(title: selfLockTitle, message: selfLockMessage, start: { c in
                 model.startSelfLock(c)
-            }
+            }, startMinutes: { m in
+                model.startSelfLock(minutes: m)
+            }, initiallyCustom: selfLockCustomDemo)
         }
         #if DEBUG
         .onAppear {
@@ -69,6 +73,7 @@ struct HomeView: View {
             case "sheet": showUnlock = true
             case "apps": showAppUnlock = true
             case "selflock": showSelfLock = true
+            case "selflock-custom": selfLockCustomDemo = true; showSelfLock = true
             default: break
             }
         }
@@ -190,6 +195,7 @@ struct HomeView: View {
         let quota = model.settings.quotaMinutes
         let used = model.usedMinutes
         let exhausted = model.quotaExhausted
+        let lockedMin = model.lockedMinutes
         let ratio = min(1, Double(used) / Double(max(quota, 1)))
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .firstTextBaseline) {
@@ -217,7 +223,8 @@ struct HomeView: View {
                 .accessibilityLabel("今日の使用時間")
                 .accessibilityValue("\(AppSettings.duration(used)) ／ \(AppSettings.duration(quota))")
 
-            Text("毎日 \(AppSettings.clock(Quota.effectiveResetMinutes)) に0に戻ります（数え方: \(model.settings.countMode.label)・\(Quota.registeredStep ?? 5)分刻みの目安）")
+            Text("毎日 \(AppSettings.clock(Quota.effectiveResetMinutes)) に0に戻ります（数え方: \(model.settings.countMode.label)・\(Quota.registeredStep ?? 5)分刻みの目安）"
+                 + (lockedMin > 0 ? "\nロックが効いていたあいだの約\(AppSettings.duration(lockedMin))は数えていません。" : ""))
                 .font(.caption).foregroundStyle(Theme.ink3)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -360,12 +367,20 @@ struct HomeView: View {
     }()
 }
 
-/// いまからロック: 時間を選ぶ（中身は以前の確認ダイアログと同じ。選んだら startSelfLock）
+/// いまからロック: 時間を選ぶ（1時間／2時間／朝のリセットまで／時間を指定）。選んだら startSelfLock
+/// 時間の指定は「何時間何分」のホイール（5分刻み・最短5分）。リセットを越える指定はリセットまでに丸める
 struct SelfLockSheet: View {
     let title: String
     let message: String
     var start: (SelfLock.Choice) -> Void
+    var startMinutes: (Int) -> Void
+    var initiallyCustom = false
     @Environment(\.dismiss) private var dismiss
+    @State private var custom = false
+    @State private var hours = 0
+    @State private var mins = 30
+
+    private var total: Int { hours * 60 + mins }
 
     var body: some View {
         ScrollView {
@@ -389,20 +404,98 @@ struct SelfLockSheet: View {
                         }
                         .buttonStyle(SecondaryButtonStyle())
                     }
-                    Button("やめる") { dismiss() }
-                        .buttonStyle(PlainWoodButtonStyle())
+                    if !custom {
+                        Button("時間を指定する…") {
+                            withAnimation(.easeOut(duration: 0.2)) { custom = true }
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                    }
                 }
                 .padding(.top, 22)
+
+                if custom {
+                    customBlock
+                        .padding(.top, 18)
+                        .transition(.opacity)
+                }
+
+                Button("やめる") { dismiss() }
+                    .buttonStyle(PlainWoodButtonStyle())
+                    .padding(.top, 10)
             }
             .padding(.horizontal, Theme.sideMargin)
             .padding(.top, 22)
             .padding(.bottom, 16)
         }
         .scrollBounceBehavior(.basedOnSize)
-        .presentationDetents([.medium, .large])
+        .presentationDetents(initiallyCustom ? [.large] : [.medium, .large])
         .presentationDragIndicator(.visible)
         .presentationBackground(Theme.paper)
         .presentationCornerRadius(28)
+        .onAppear { if initiallyCustom { custom = true } }
+    }
+
+    /// 何時間何分のホイール＋終わる時刻＋決めるボタン
+    @ViewBuilder
+    private var customBlock: some View {
+        let toReset = SelfLock.minutesToReset()
+        let maxHours = max(0, toReset / 60)
+        let result = SelfLock.customUntil(minutes: total)
+        VStack(alignment: .leading, spacing: 0) {
+            FieldLabel(title: "時間を指定", trailing: "5分刻み")
+            HStack(spacing: 0) {
+                Picker("時間", selection: $hours) {
+                    ForEach(0...maxHours, id: \.self) { Text("\($0)時間").monospacedDigit().tag($0) }
+                }
+                .pickerStyle(.wheel)
+                .frame(maxWidth: .infinity)
+                .clipped()
+                Picker("分", selection: $mins) {
+                    ForEach(Array(stride(from: 0, through: 55, by: SelfLock.customStep)), id: \.self) {
+                        Text("\($0)分").monospacedDigit().tag($0)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .frame(maxWidth: .infinity)
+                .clipped()
+            }
+            .frame(height: 150)
+            .padding(.horizontal, 8)
+            .paperCard(radius: 14)
+            .padding(.top, 8)
+
+            Group {
+                if let r = result {
+                    if r.clamped {
+                        Text("リセット（\(LockReason.clock.string(from: r.until))）を越えるので、リセットまでにします。")
+                            .foregroundStyle(Theme.caution)
+                    } else {
+                        Text("\(LockReason.clock.string(from: r.until)) に終わります。")
+                            .foregroundStyle(Theme.ink2)
+                    }
+                } else {
+                    Text(toReset < SelfLock.customMinimum
+                         ? "リセットまで\(SelfLock.customMinimum)分もないので、指定できません。"
+                         : "\(SelfLock.customMinimum)分以上を選んでください。")
+                        .foregroundStyle(Theme.caution)
+                }
+            }
+            .font(.footnote)
+            .monospacedDigit()
+            .padding(.top, 8)
+            .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                startMinutes(total)
+                dismiss()
+            } label: {
+                Text(result.map { "\(AppSettings.duration($0.clamped ? toReset : total)) ロックする（\(LockReason.clock.string(from: $0.until))まで）" }
+                     ?? "ロックする").monospacedDigit()
+            }
+            .buttonStyle(PrimaryButtonStyle())
+            .disabled(result == nil)
+            .padding(.top, 14)
+        }
     }
 }
 

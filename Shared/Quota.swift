@@ -7,7 +7,7 @@ import ManagedSettings
 //
 // ★ 数え方の差し替え点はこのファイルだけ（試験2 が未了のため）。
 //   - CountMode            … どちらの数え方か（settings.json の countMode）
-//   - usedMinutes(...)     … 段階イベントの値から使用時間を出す
+//   - usedMinutes(...)     … 段階イベントの値から使用時間を出す（ロック中に増えた分は LockSpans で差し引く）
 //   - events(...)          … 監視 daily に並べるイベント
 //   - isExhausted(...)     … 枠を使い切ったか
 //   他のファイルに数え方の if を書かないこと。
@@ -16,9 +16,9 @@ import ManagedSettings
 // 「使っているあいだ数分ごとに MonitorExt が起きる目覚まし」も兼ねる。
 
 enum CountMode: String, Codable, CaseIterable {
-    /// 許可アプリ込みで数える（形B）。初期値
+    /// 許可アプリ込みで数える（形B）
     case inclusive
-    /// 許可アプリを除いて数える（形A: all − allowed）
+    /// 許可アプリを除いて数える（形A: all − allowed）。2026-10-15 から初期値
     case excludeAllowed
 
     var label: String {
@@ -56,22 +56,35 @@ enum Quota {
 
     // MARK: ★差し替え点
 
-    /// 使用時間（分）
-    static func usedMinutes(_ u: UsageState, mode: CountMode) -> Int {
+    /// 段階イベントの値そのままの使用時間（分。ロック中の分も含む）
+    static func rawUsedMinutes(_ u: UsageState, mode: CountMode) -> Int {
         switch mode {
         case .inclusive: return u.allMin
         case .excludeAllowed: return max(0, u.allMin - u.allowedMin)
         }
     }
 
+    /// ロックが効いているあいだに増えた分（枠に数えない。LockSpans）
+    static func lockedMinutes(_ u: UsageState, mode: CountMode) -> Int {
+        LockSpans.lockedMinutes(u, mode: mode)
+    }
+
+    /// 枠に数える使用時間（分）= 段階の値 − ロック中に増えた分（下限0）。ホームの「使った」もこれ
+    static func usedMinutes(_ u: UsageState, mode: CountMode) -> Int {
+        max(0, rawUsedMinutes(u, mode: mode) - lockedMinutes(u, mode: mode))
+    }
+
     /// 枠を使い切ったか
     static func isExhausted(_ u: UsageState, settings s: AppSettings) -> Bool {
+        let locked = lockedMinutes(u, mode: s.countMode)
+        let used = max(0, rawUsedMinutes(u, mode: s.countMode) - locked)
         switch s.countMode {
         case .inclusive:
-            // 段階より正確な quota イベントを優先。段階の値でも超えていれば使い切り
-            return u.quotaHitFor == s.quotaMinutes || usedMinutes(u, mode: .inclusive) >= s.quotaMinutes
+            // 段階より正確な quota イベントを優先（ただし quota は全使用で発火するので、ロック中の分を
+            // 差し引いているときは使えない）。段階の値でも超えていれば使い切り
+            return (u.quotaHitFor == s.quotaMinutes && locked == 0) || used >= s.quotaMinutes
         case .excludeAllowed:
-            return usedMinutes(u, mode: .excludeAllowed) >= s.quotaMinutes
+            return used >= s.quotaMinutes
         }
     }
 
@@ -83,8 +96,9 @@ enum Quota {
         let hasAllowed = !(sel.applicationTokens.isEmpty && sel.webDomainTokens.isEmpty && sel.categoryTokens.isEmpty)
         switch s.countMode {
         case .inclusive:
-            // 枠の少し先まで細かい段階（表示用・目覚まし用）＋ちょうど枠の quota（ロック用）
-            for k in allThresholds(step: step, fineUntil: quota + 60) {
+            // 枠の先まで細かい段階（表示用・目覚まし用）＋ちょうど枠の quota（ロック用）。
+            // ロック中の分を差し引くと全使用が枠を越えてから使い切りになるので、4時間ぶん先まで細かく
+            for k in allThresholds(step: step, fineUntil: quota + 240) {
                 ev[allEvent(k)] = event(threshold: k)
             }
             ev[quotaEvent] = event(threshold: quota)

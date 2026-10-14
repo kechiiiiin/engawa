@@ -55,10 +55,17 @@ struct SettingsView: View {
                 Picker("リセット時刻", selection: binding(\.resetMinutes)) {
                     ForEach(AppSettings.resetChoices, id: \.self) { Text(AppSettings.clock($0)).tag($0) }
                 }
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("許可アプリの時間は数えない", isOn: excludeAllowedBinding)
+                    Text("全体から許可アプリの分を差し引く推定で、5分刻みの数え方のため数分の誤差があります。")
+                        .font(.footnote).foregroundStyle(Theme.ink3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 4)
             } header: {
                 SettingsHeader(title: "一日のきまり")
             } footer: {
-                Text("枠を使い切るとロックします。リセット時刻に使用時間が0に戻り、枠のロックが外れます（手動ロックは外れません）。")
+                Text("枠を使い切るとロックします。ロックが効いているあいだの使用（電話・許可アプリなど）は数えません。リセット時刻に使用時間が0に戻り、枠のロックが外れます（手動ロックは外れません）。")
                     .foregroundStyle(Theme.ink3)
             }
 
@@ -95,6 +102,12 @@ struct SettingsView: View {
         .navigationBarTitleDisplayMode(.large)
         .familyActivityPicker(isPresented: $showPicker, selection: $model.selection)
         .onChange(of: model.selection) { _, s in model.saveSelection(s) }
+    }
+
+    /// オンで差し引き（excludeAllowed）・オフで許可アプリ込み（inclusive）
+    private var excludeAllowedBinding: Binding<Bool> {
+        Binding(get: { model.settings.countMode == .excludeAllowed },
+                set: { on in var s = model.settings; s.countMode = on ? .excludeAllowed : .inclusive; model.saveSettings(s) })
     }
 
     private func binding(_ kp: WritableKeyPath<AppSettings, Int>) -> Binding<Int> {

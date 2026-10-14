@@ -35,6 +35,8 @@ final class AppModel: ObservableObject {
 
     var hasToken: Bool { Store.token != nil }
     var usedMinutes: Int { Quota.usedMinutes(usage, mode: settings.countMode) }
+    /// ロックが効いているあいだに増えた分（「使った」から差し引いている分）
+    var lockedMinutes: Int { Quota.lockedMinutes(usage, mode: settings.countMode) }
     var quotaExhausted: Bool { Quota.isExhausted(usage, settings: settings) }
     var unlockUntil: Date? { status.unlockUntil.flatMap(ISO.parse) }
     var selfLockUntil: Date? { status.selfLockUntil.flatMap(ISO.parse) }
@@ -148,9 +150,21 @@ final class AppModel: ObservableObject {
     // MARK: セルフロック（いまからロック）
 
     func startSelfLock(_ choice: SelfLock.Choice) {
-        let until = choice.until()
+        startSelfLock(until: choice.until(), choice: choice.rawValue)
+    }
+
+    /// 時間を指定（分）。リセットを越える指定はリセットまでに丸める。規則は startSelfLock と同じ（短くはしない等）
+    func startSelfLock(minutes: Int) {
+        guard let c = SelfLock.customUntil(minutes: minutes) else {
+            unlockMessage = "\(SelfLock.customMinimum)分以上を選んでください（リセットまで\(SelfLock.customMinimum)分も無いときは指定できません）"
+            return
+        }
+        startSelfLock(until: c.until, choice: "custom-\(minutes)m" + (c.clamped ? "-toReset" : ""))
+    }
+
+    private func startSelfLock(until: Date, choice: String) {
         let before = Store.selfLockUntil
-        Shield.startSelfLock(until: until, choice: choice.rawValue)
+        Shield.startSelfLock(until: until, choice: choice)
         refreshHome()
         let end = Store.selfLockUntil ?? until
         if let before, before >= until {

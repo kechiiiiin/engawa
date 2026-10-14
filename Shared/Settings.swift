@@ -9,8 +9,9 @@ struct AppSettings: Codable, Equatable {
     var quotaMinutes: Int = 150
     /// リセット時刻（0:00 からの分）。初期 4:00
     var resetMinutes: Int = 240
-    /// 数え方（試験2 待ち。差し替え点は Quota.swift）。初期は許可アプリ込み
-    var countMode: CountMode = .inclusive
+    /// 数え方（差し替え点は Quota.swift）。2026-10-15 本人の要望で初期は差し引き（許可アプリを数えない）。
+    /// 以前 inclusive で保存されていた端末は Store.migrateCountModeIfNeeded で1回だけ切り替える
+    var countMode: CountMode = .excludeAllowed
 
     init() {}
 
@@ -48,5 +49,21 @@ extension Store {
     static var settings: AppSettings {
         get { codable("settings.json", as: AppSettings.self) ?? AppSettings() }
         set { setCodable("settings.json", newValue) }
+    }
+
+    /// 数え方を差し引き（excludeAllowed）へ1回だけ切り替える（2026-10-15 の更新）。本体の起動時に呼ぶ。
+    /// 済んだ印は countModeMigratedV1。切り替えたら監視 daily を新しい数え方のイベントで登録し直す。
+    /// 以後、本人が設定でオフ（inclusive）にしたものは戻さない
+    static func migrateCountModeIfNeeded() {
+        guard string("countModeMigratedV1") == nil else { return }
+        var s = settings
+        let old = s.countMode
+        if old != .excludeAllowed {
+            s.countMode = .excludeAllowed
+            settings = s
+        }
+        setString("countModeMigratedV1", ISO.now)
+        Log.add(kind: "migrate", detail: "countMode \(old.rawValue) → excludeAllowed（1回だけ）")
+        if old != .excludeAllowed { Quota.arm(reason: "migrateCountMode") }
     }
 }

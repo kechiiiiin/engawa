@@ -193,11 +193,15 @@ enum Shield {
                                   + (exceptChanged ? " 例外を書き直し" : "")
                                   + (dropped > 0 ? " 上限で入れなかった個別解除=\(dropped)" : "")))
         }
+        // ロック中の使用を数えないための印（効き始め・外れ。LockSpans）。個別解除があるあいだは、
+        // どのアプリの使用か分けられないので「外れている」として数える
+        let active = AppUnlocks.active(now)
+        LockSpans.note(effective: now2 && shouldLock && active.isEmpty, usage: Quota.usage(now), now: now, route: route)
         // 期限の目覚まし（変わったときだけ登録し直す）
         Wake.armExpiryWakes(route: route)
         let st = LockStatus(locked: shouldLock, reason: reason, unlockUntil: until.map(ISO.string),
                             unlockSource: until == nil ? nil : Store.unlockSource, updatedAt: ISO.now,
-                            selfLockUntil: selfLock.map(ISO.string), appUnlockCount: AppUnlocks.active(now).count)
+                            selfLockUntil: selfLock.map(ISO.string), appUnlockCount: active.count)
         Store.setCodable("status.json", st)
         return st
     }

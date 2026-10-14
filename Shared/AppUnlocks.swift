@@ -196,6 +196,30 @@ enum SelfLock {
             }
         }
     }
+
+    // MARK: 時間を指定（2026-10-15 本人の要望）
+
+    /// 指定の刻み・最短（分）
+    static let customStep = 5
+    static let customMinimum = 5
+
+    /// いまからリセットまで（分・切り捨て）
+    static func minutesToReset(_ now: Date = Date()) -> Int {
+        max(0, Int(Quota.nextReset(now).timeIntervalSince(now) / 60))
+    }
+
+    /// 指定した長さの終わり。リセットを越える指定はリセットまでに丸める（clamped=true）。
+    /// 最短より短い・リセットまで最短も無いときは nil
+    static func customUntil(minutes: Int, now: Date = Date()) -> (until: Date, clamped: Bool)? {
+        guard minutes >= customMinimum else { return nil }
+        let reset = Quota.nextReset(now)
+        let want = now.addingTimeInterval(TimeInterval(minutes * 60))
+        if want > reset {
+            guard reset.timeIntervalSince(now) >= TimeInterval(customMinimum * 60) else { return nil }
+            return (reset, true)
+        }
+        return (want, false)
+    }
 }
 
 extension Store {

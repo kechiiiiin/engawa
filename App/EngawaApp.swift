@@ -67,7 +67,7 @@ struct RootView: View {
 #if DEBUG
 /// 見た目の確認用（シミュレータでスクリーンショットを撮るため）。`-engawaUIDemo <mode>` で起動したときだけ、
 /// 表示用の状態を画面の model にだけ入れ、同期・見回り・許可の要求・通知の登録をしない（シミュレータ用）。
-/// mode: usable／locked／unlocked／selflock／sheet／apps／settings。Debug ビルドだけ
+/// mode: usable／locked／unlocked／selflock／selflock-custom／sheet／apps／settings。Debug ビルドだけ
 enum UIDemo {
     static let mode: String? = UserDefaults.standard.string(forKey: "engawaUIDemo")
 
@@ -115,6 +115,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         Log.trimLog()   // log.jsonl の trim は本体だけが行う
         LaunchConfig.importFiles()
         LaunchConfig.migrateFromSpike()
+        Store.migrateCountModeIfNeeded()
         LaunchConfig.applyArguments()
         Log.add(kind: "launch", detail: Store.routes.summary)
         Shield.reconcile(route: "launch")

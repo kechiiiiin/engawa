@@ -35,7 +35,7 @@ struct DeveloperView: View {
                 Button("URL を保存") { model.saveServer() }
             }
 
-            Section("枠（数え方は試験2 待ち）") {
+            Section("枠（数え方）") {
                 Picker("数え方", selection: Binding(get: { model.settings.countMode },
                                                  set: { m in var s = model.settings; s.countMode = m; model.saveSettings(s) })) {
                     ForEach(CountMode.allCases, id: \.self) { Text($0.label).tag($0) }
@@ -43,6 +43,8 @@ struct DeveloperView: View {
                 LabeledContent("期間の始まり", value: model.usage.periodStart)
                 LabeledContent("all（すべて）", value: "\(model.usage.allMin) 分")
                 LabeledContent("allowed（許可アプリ）", value: "\(model.usage.allowedMin) 分")
+                LabeledContent("ロック中に増えた分（数えない）", value: "\(model.lockedMinutes) 分")
+                LabeledContent("枠に数える分", value: "\(model.usedMinutes) 分")
                 LabeledContent("quota の発火", value: model.usage.quotaHitFor.map { "枠 \($0) 分で発火" } ?? "まだ")
                 LabeledContent("刻み・実際のリセット", value: "\(Quota.registeredStep.map(String.init) ?? "—") 分・\(AppSettings.clock(Quota.effectiveResetMinutes))")
                 Button("枠の監視（daily）を登録し直す") { model.armDaily() }
