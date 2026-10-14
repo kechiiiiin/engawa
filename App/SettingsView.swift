@@ -12,8 +12,9 @@ struct SettingsView: View {
         Form {
             Section {
                 let apps = model.selection.applicationTokens.count
+                let cats = model.selection.categoryTokens.count
                 let domains = model.selection.webDomainTokens.count
-                LabeledContent("選んでいるもの", value: "アプリ \(apps)・サイト \(domains)")
+                LabeledContent("選んでいるもの", value: "アプリ \(apps)・カテゴリ \(cats)・サイト \(domains)")
                 Button("許可アプリを選び直す") { showPicker = true }
                 if apps + domains > 50 {
                     Text("50個を超えています。ロックの例外にできるのは合わせて50個までです。")
@@ -23,6 +24,33 @@ struct SettingsView: View {
                     Text("カテゴリで選んだものはロックの例外になりません。アプリを個別に選んでください。")
                         .font(.footnote).foregroundStyle(.orange)
                 }
+
+                if apps == 0 && cats == 0 && domains == 0 {
+                    Text("まだ選んでいません")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    if apps > 0 {
+                        Text("アプリ").font(.caption).foregroundStyle(.secondary)
+                        ForEach(Array(model.selection.applicationTokens), id: \.self) { token in
+                            Label(token)
+                        }
+                    }
+                    if cats > 0 {
+                        Text("カテゴリ").font(.caption).foregroundStyle(.secondary)
+                        ForEach(Array(model.selection.categoryTokens), id: \.self) { token in
+                            Label(token)
+                        }
+                    }
+                    if domains > 0 {
+                        Text("サイト").font(.caption).foregroundStyle(.secondary)
+                        ForEach(Array(model.selection.webDomainTokens), id: \.self) { token in
+                            Label(token)
+                        }
+                    }
+                }
+
+                Text("電話・メッセージ・FaceTime・マップは iOS の仕様で常に止まりません。")
+                    .font(.caption).foregroundStyle(.secondary)
             } header: {
                 Text("許可アプリ")
             } footer: {
