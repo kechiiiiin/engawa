@@ -281,12 +281,14 @@ enum Log {
     }
 
     /// 未送信の記録をサーバーへ送る。自分の outbox を rename で取り出して送信待ちに足し、失敗したら次に持ち越す。
-    /// 本体からは ShieldConfig／ShieldAction の分も送る
+    /// 本体からは ShieldConfig／ShieldAction の分も送る。アプリからの解除の記録（Unlocks）もここで送る
     @discardableResult
     static func flush(timeout: TimeInterval = 4) -> String {
         let me = LogRecord.currentProc
+        // 解除の記録（理由つき）を先に送る（送れなかったものの記録が下の flush に乗るように）
+        let unlocks = "解除: \(Unlocks.flush(timeout: timeout))"
         let procs = me == "app" ? ["app", "shieldConfig", "shieldAction"] : [me]
-        return procs.map { p in "\(p): \(flush(proc: p, timeout: timeout))" }.joined(separator: " / ")
+        return ([unlocks] + procs.map { p in "\(p): \(flush(proc: p, timeout: timeout))" }).joined(separator: " / ")
     }
 
     private static func flush(proc: String, timeout: TimeInterval) -> String {

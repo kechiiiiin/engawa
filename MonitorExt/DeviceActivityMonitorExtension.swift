@@ -13,6 +13,10 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         wake("intervalDidStart", activity)
         if activity == .relock {
             relock()
+        } else if activity == .daily {
+            // リセット時刻: 使用時間を0に戻し、枠ロックを外す（手動ロック・時間解除はそのまま）
+            Quota.startNewPeriod()
+            Shield.reconcile(route: "reset")
         } else if activity == .pollA || activity == .pollB {
             keepOtherPollAlive(activity)
         }
@@ -58,9 +62,15 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
                Store.routes.usageWake {
                 Wake.armUsage(n: Store.usageN)
             }
+        } else if activity == .daily {
+            // 段階イベント・quota: 使用時間を記録し、使い切っていれば枠ロック（三層で決める）
+            Quota.record(event)
+            Shield.reconcile(route: "quota")
         } else if activity == .test2, event.rawValue == "E-all", Store.routes.thresholdLock {
-            Shield.lockNow()
-            Log.add(LogRecord(kind: "thresholdLock", route: "test2", locked: true, appliedAt: ISO.now, ok: Shield.isShielded))
+            // 試験2 の「E-all 到達でロック」は枠ロックの印として扱う（三層の外から shield を書かない）
+            Quota.markExhaustedForTest()
+            let st = Shield.reconcile(route: "test2")
+            Log.add(LogRecord(kind: "thresholdLock", route: "test2", locked: st.locked, appliedAt: ISO.now, ok: Shield.isShielded == st.locked))
         }
         finish(activity)
     }
@@ -79,6 +89,7 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         case .usage: return "R5"
         case .relock: return "relock"
         case .test2: return "test2"
+        case .daily: return "daily"
         default: return activity.rawValue
         }
     }
@@ -87,19 +98,22 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         Log.add(kind: "wake", route: route(for: activity), detail: "\(callback) \(activity.rawValue)")
     }
 
-    /// 時間解除の終わり。そのあいだに別の指示（無期限解除など）が来ていたら掛けない
+    /// 時間解除の終わり。時間解除を外して三層で決め直す（手動ロックも枠ロックも無ければ掛からない）。
+    /// そのあいだに別の指示（新しい時間解除など）が来ていたら何もしない
     private func relock() {
         let until = Store.unlockUntil
         let target = Store.relockFor
-        // 登録したときの対象（relockFor）と今の unlockUntil が同じときだけ掛ける（古い relock を無視する）
+        // 登録したときの対象（relockFor）と今の unlockUntil が同じときだけ外す（古い relock を無視する）
         let matches = until != nil && target != nil && abs(until!.timeIntervalSince(target!)) < 1
         if let until, matches, until <= Date().addingTimeInterval(120) {
-            Shield.lockNow()
             Store.unlockUntil = nil
             Store.relockFor = nil
-            Log.add(LogRecord(kind: "relock", route: "relock", version: Store.appliedVersion, locked: true,
-                              appliedAt: ISO.now, ok: Shield.isShielded, error: Shield.isShielded ? nil : "読み戻しで shield なし",
-                              detail: "unlockUntil=\(ISO.string(until))"))
+            Store.unlockSource = nil
+            let st = Shield.reconcile(route: "relock")
+            Log.add(LogRecord(kind: "relock", route: "relock", version: Store.appliedVersion, locked: st.locked,
+                              appliedAt: ISO.now, ok: Shield.isShielded == st.locked,
+                              error: Shield.isShielded == st.locked ? nil : "読み戻し不一致",
+                              detail: "unlockUntil=\(ISO.string(until)) reason=\(st.reason.rawValue)"))
         } else {
             Log.add(kind: "relock", route: "relock", ok: true,
                     detail: "掛けない（unlockUntil=\(until.map(ISO.string) ?? "なし") relockFor=\(target.map(ISO.string) ?? "なし")）")
@@ -118,8 +132,8 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
 
     /// 経路がオンならサーバーを見に行って反映し、記録を送る
     private func finish(_ activity: DeviceActivityName) {
-        // どのコールバックでも、期限切れの時間解除が外れたままなら掛け直す（relock の取りこぼしの自己修復）
-        Shield.healExpiredUnlock()
+        // どのコールバックでも、期限切れの時間解除が外れたままなら掛け直す（relock の取りこぼしの自己修復 sync-fallback）
+        Shield.reconcile(route: "sync-fallback")
         let r = Store.routes
         let wantsSync = ((activity == .pollA || activity == .pollB) && r.poll) || (activity == .usage && r.usageWake)
         if wantsSync {

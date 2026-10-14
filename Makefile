@@ -4,6 +4,7 @@
 #   make resign        generate → build → install（有料チームなので再署名は年1回でよい見込み）
 #   make check         実機なしでコンパイルだけ確かめる（署名しない）
 #   make lock / unlock M=15 / state     サーバーを叩く
+#   make unlocks       縁側アプリからの解除の履歴（理由つき・SINCE= で絞る）
 #   make push-alert / push-silent        Mac から APNs（sandbox）へ送る（tools/push.sh）
 #   make events        記録を取って経路別の遅れを表にする（tools/latency.py）
 #
@@ -36,7 +37,7 @@ AUTH = -H "Authorization: Bearer $$(cat $(TOKEN_FILE))"
 M ?=
 
 .PHONY: help resign generate build install launch check devices clean \
-        lock unlock state push-alert push-silent events import-token routes test2 usage-n
+        lock unlock state unlocks push-alert push-silent events import-token routes test2 usage-n
 
 help:
 	@echo "resign        generate → build → install"
@@ -50,6 +51,7 @@ help:
 	@echo "lock          サーバーをロックに（PUSH=alert|silent で Worker からも送る）"
 	@echo "unlock M=15   サーバーを解除に（M を付けると時間解除）"
 	@echo "state         サーバーの状態"
+	@echo "unlocks       アプリからの解除の履歴（理由つき。SINCE=ISO で絞る）"
 	@echo "push-alert    Mac から alert プッシュ（R3）"
 	@echo "push-silent   Mac からサイレントプッシュ（R2）"
 	@echo "events        記録を取って経路別の遅れを表に（SINCE= で絞る）"
@@ -134,6 +136,9 @@ unlock: _server
 
 state: _server
 	@curl -sS $(AUTH) "$(SERVER)/state"; echo
+
+unlocks: _server
+	@curl -sS $(AUTH) "$(SERVER)/unlocks$(if $(SINCE),?since=$(SINCE),)" | python3 -c 'import sys,json; [print(u["at"], str(u["minutes"])+"分", u.get("lockReason") or "-", "使用"+str(u.get("usedMinutes"))+"/"+str(u.get("quotaMinutes")), u["reason"].replace(chr(10)," ")) for u in json.load(sys.stdin)["unlocks"]]'
 
 push-alert: _server
 	SERVER="$(SERVER)" TOKEN_FILE="$(TOKEN_FILE)" tools/push.sh alert

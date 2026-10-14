@@ -7,6 +7,8 @@
 //   GET  /device                      最新のデバイストークン（tools/push.sh 用・設計の表に足したもの）
 //   POST /events                      端末の記録をまとめて受け取る {events:[…]}
 //   GET  /events?since=ISO            記録を返す
+//   POST /unlocks                     縁側アプリからの時間解除（理由つき）を記録する（2026-10-14 足し算）
+//   GET  /unlocks?since=ISO&limit=N   解除の履歴（新しい順）
 //   GET  /                            最小のボタンページ（トークンは URL のフラグメント #<token> で渡す）
 
 import { type ApnsEnv, type PushKind, type StatePayload, sendPush } from "./apns";
@@ -236,6 +238,65 @@ function parseMinutes(url: URL): number | null | "bad" {
   return n;
 }
 
+const LOCK_REASONS = new Set(["none", "manual", "quota", "manualAndQuota"]);
+
+// 縁側アプリからの時間解除の記録。状態（state）は変えない（解除は端末の中で済んでいる・記録だけ）
+async function postUnlock(req: Request, env: Env) {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "JSON が読めない" }, 400);
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return json({ error: "オブジェクトで送ること" }, 400);
+  const b = body as Record<string, unknown>;
+  const id = typeof b.id === "string" && /^[A-Za-z0-9-]{8,64}$/.test(b.id) ? b.id : null;
+  if (!id) return json({ error: "id が不正" }, 400);
+  const at = typeof b.at === "string" && !Number.isNaN(Date.parse(b.at)) ? b.at : null;
+  if (!at) return json({ error: "at は ISO 8601 の時刻" }, 400);
+  const minutes = int(b.minutes);
+  if (minutes === null || minutes < 1 || minutes > 24 * 60) return json({ error: "minutes は 1〜1440 の整数" }, 400);
+  const reason = typeof b.reason === "string" ? b.reason.trim() : "";
+  if (reason.length === 0) return json({ error: "reason は必須" }, 400);
+  if (reason.length > 500) return json({ error: "reason は500字まで" }, 400);
+  const until = typeof b.until === "string" && !Number.isNaN(Date.parse(b.until))
+    ? b.until
+    : new Date(Date.parse(at) + minutes * 60_000).toISOString();
+  const lockReason = typeof b.lockReason === "string" && LOCK_REASONS.has(b.lockReason) ? b.lockReason : null;
+  const usedMinutes = int(b.usedMinutes);
+  const quotaMinutes = int(b.quotaMinutes);
+
+  const res = await env.DB.prepare(
+    `INSERT OR IGNORE INTO unlocks (id, at, received_at, minutes, until, reason, lock_reason, used_minutes, quota_minutes, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'app')`,
+  )
+    .bind(id, at, nowIso(), minutes, until, reason, lockReason, usedMinutes, quotaMinutes)
+    .run();
+  const inserted = res.meta.changes ?? 0;
+  if (inserted > 0) {
+    await serverEvent(env, "deviceUnlock", {
+      route: "app",
+      ok: true,
+      detail: `minutes=${minutes} until=${until} lockReason=${lockReason ?? "?"}`,
+    });
+  }
+  return json({ ok: true, inserted, id });
+}
+
+async function getUnlocks(url: URL, env: Env) {
+  const since = url.searchParams.get("since") ?? "1970-01-01T00:00:00Z";
+  const n = Math.trunc(Number(url.searchParams.get("limit") ?? "200"));
+  const limit = Math.min(Math.max(1, Number.isFinite(n) ? n : 200), 5000);
+  const { results } = await env.DB.prepare(
+    `SELECT id, at, received_at AS receivedAt, minutes, until, reason, lock_reason AS lockReason,
+            used_minutes AS usedMinutes, quota_minutes AS quotaMinutes, source
+     FROM unlocks WHERE at >= ? ORDER BY at DESC LIMIT ?`,
+  )
+    .bind(since, limit)
+    .all<Record<string, unknown>>();
+  return json({ unlocks: results });
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
@@ -269,6 +330,10 @@ export default {
           return await postEvents(req, env);
         case "GET /events":
           return await getEvents(url, env);
+        case "POST /unlocks":
+          return await postUnlock(req, env);
+        case "GET /unlocks":
+          return await getUnlocks(url, env);
         default:
           return json({ error: "not found" }, 404);
       }

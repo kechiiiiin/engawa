@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import UIKit
 import UserNotifications
 
@@ -9,8 +10,31 @@ struct EngawaApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
                 .environmentObject(model)
+        }
+    }
+}
+
+/// 最初の画面（ホーム）。前面に来るたび R1、前面にいるあいだは20秒ごとに見回る
+struct RootView: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
+    private let timer = Timer.publish(every: 20, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        NavigationStack {
+            HomeView()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { model.syncOnForeground() }
+        }
+        .onReceive(timer) { _ in
+            if scenePhase == .active { model.tick() }
+        }
+        .onAppear {
+            model.refresh()
+            if model.authStatus == .notDetermined { model.requestAuth() }  // 受け入れ条件9
         }
     }
 }
@@ -21,8 +45,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         Log.trimLog()   // log.jsonl の trim は本体だけが行う
         LaunchConfig.importFiles()
+        LaunchConfig.migrateFromSpike()
         LaunchConfig.applyArguments()
         Log.add(kind: "launch", detail: Store.routes.summary)
+        Shield.reconcile(route: "launch")
 
         let center = UNUserNotificationCenter.current()
         center.delegate = self
@@ -99,6 +125,16 @@ enum LaunchConfig {
             try? FileManager.default.removeItem(at: serverFile)
             Log.add(kind: "import", ok: true, detail: "server=\(t)")
         }
+    }
+
+    /// 試作（ロックの層が1つ）から入れ替えた直後に1回だけ: 今の shield から手動ロックを推して残し、
+    /// 次の同期でサーバーの状態を読み直させる（appliedVersion を0に）
+    static func migrateFromSpike() {
+        guard Store.string("manualLock") == nil else { return }
+        let manual = Store.manualLock   // ファイルが無いときは shield と時間解除から推した値
+        Store.manualLock = manual
+        Store.appliedVersion = 0
+        Log.add(kind: "migrate", detail: "manualLock=\(manual)（試作から。次の同期でサーバーを読み直す）")
     }
 
     /// `-engawaRoutes poll,alertPush`（書いたものだけオン）／`-engawaServer URL`／`-engawaRegisterTest2 YES`

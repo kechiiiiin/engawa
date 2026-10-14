@@ -5,6 +5,17 @@
 自分の iPhone を「外（サーバー）から」ロックできるか、許可アプリを除いて使用時間を数えられるかを、実機で決着させるための捨てる前提の試作。
 設計書（正）: jinsei vault `hestia/projects/スマホ制限アプリ試作設計.md`。名前・Bundle ID は仮。
 
+## 普段使いの形（2026-10-14〜）
+
+本番設計（たたき台）: jinsei vault `hestia/projects/縁側本番設計.md`。冒頭の「2026-10-14 本人判断」が本文より優先（解除はアプリ内・理由＋時間。ブラウザの解除ページは作らない）。
+
+- ホーム（`App/HomeView.swift`）: ロック中か・理由（枠切れ／手動／時間解除の残り）・今日の使用時間と残りの枠・「解除する」（理由必須＋15／30／60分）・代わりにやりたいこと
+- 設定（`App/SettingsView.swift`）: 許可アプリ・1日の枠（初期 2時間30分）・リセット時刻（初期 4:00）・やりたいこと一覧の編集。奥に「開発者向け」（`App/DeveloperView.swift` = 試作の計測用画面）
+- ロックの決め方は三層: `ロックする = (手動ロック || 枠ロック) && !時間解除中`（`Shared/Shield.swift` の `reconcile`）。手動ロックはサーバー（`make lock`）、枠ロックは端末、時間解除はサーバー（`make unlock M=`）か縁側アプリ
+- 枠（`Shared/Quota.swift`）: 監視 `daily`（リセット時刻〜翌日の1分前）に段階イベント `all-k`＋`quota`。**数え方の差し替え点はこのファイルだけ**（試験2 待ち。初期は許可アプリ込み）
+- やりたいこと一覧は App Group の `ideas.json`（`Shared/Ideas.swift`。無ければ既定の10件）。Shield はここからランダム
+- アプリからの解除は `POST /unlocks` に理由つきで記録（届かなければ App Group に溜めて次に送る）。履歴は `make unlocks`
+
 ## 構成
 
 | ディレクトリ | 中身 |
@@ -15,7 +26,7 @@
 | `ShieldActionExt/` | 「閉じる」ボタン（記録して `.close`） |
 | `PushExt/` | Notification Service 拡張（R3: alert プッシュのペイロードの state を shield に反映し、成否を本文に足す） |
 | `Shared/` | 全ターゲット共通（App Group のファイル置き場・記録・同期待ちの通信・shield の掛け外し・監視の登録） |
-| `server/` | Cloudflare Workers + D1（`/state` `/lock` `/unlock` `/device` `/events` `/`） |
+| `server/` | Cloudflare Workers + D1（`/state` `/lock` `/unlock` `/device` `/events` `/unlocks` `/`） |
 | `tools/` | `push.sh`（Mac から APNs sandbox へ）・`latency.py`（経路別の遅れの表） |
 
 経路: R1 アプリを開いて同期／R2 サイレントプッシュ／R3 alert プッシュ＋NSE／R4 予定の目覚まし（15分×2本）／R5 使用量の目覚まし（使用1分ごと）。
