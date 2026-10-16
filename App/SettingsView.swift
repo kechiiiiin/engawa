@@ -1,12 +1,13 @@
 import SwiftUI
 import FamilyControls
 
-// 設定: 許可アプリの選び直し・1日の枠・リセット時刻・やりたいこと一覧・（奥に）開発者向け。
+// 設定: 許可アプリの選び直し・スーパーロックで残すアプリ・1日の枠・リセット時刻・やりたいこと一覧・（奥に）開発者向け。
 // 変更はすぐ効く（2026-10-14 本人判断で、アプリ内で緩める抜け道は許容）。
 
 struct SettingsView: View {
     @EnvironmentObject var model: AppModel
     @State private var showPicker = false
+    @State private var showSuperPicker = false
 
     var body: some View {
         Form {
@@ -47,6 +48,8 @@ struct SettingsView: View {
                 Text("ロック中も使えるアプリです。電話・メッセージ・FaceTime・マップは iOS の仕様で常に止まりません。")
                     .foregroundStyle(Theme.ink3)
             }
+
+            superSection
 
             Section {
                 Picker("1日の枠", selection: binding(\.quotaMinutes)) {
@@ -102,6 +105,41 @@ struct SettingsView: View {
         .navigationBarTitleDisplayMode(.large)
         .familyActivityPicker(isPresented: $showPicker, selection: $model.selection)
         .onChange(of: model.selection) { _, s in model.saveSelection(s) }
+    }
+
+    /// スーパーロックで残すアプリ（ふだんの許可アプリとは別の一覧。2026-10-16）
+    private var superSection: some View {
+        let sel = model.superSelection
+        let apps = sel.applicationTokens.count
+        let cats = sel.categoryTokens.count
+        let domains = sel.webDomainTokens.count
+        return Section {
+            if apps + cats + domains == 0 {
+                Text("まだ選んでいません")
+                    .font(.callout).foregroundStyle(Theme.ink2)
+            } else {
+                ForEach(Array(sel.applicationTokens), id: \.self) { token in Label(token) }
+                ForEach(Array(sel.categoryTokens), id: \.self) { token in Label(token) }
+                ForEach(Array(sel.webDomainTokens), id: \.self) { token in Label(token) }
+            }
+            Button(apps + cats + domains == 0 ? "アプリを選ぶ…" : "選び直す…") { showSuperPicker = true }
+                .foregroundStyle(Theme.wood)
+            if apps + domains > 50 {
+                Text("50個を超えています。ロックの例外にできるのは合わせて50個までです。")
+                    .font(.footnote).foregroundStyle(Theme.danger)
+            }
+            if cats > 0 {
+                Text("カテゴリで選んだものはロックの例外になりません。アプリを個別に選んでください。")
+                    .font(.footnote).foregroundStyle(Theme.caution)
+            }
+        } header: {
+            SettingsHeader(title: "スーパーロックで残すアプリ", count: apps + cats + domains)
+        } footer: {
+            Text("スーパーロック中は、ここで選んだアプリだけが使えます。ふだんの許可アプリも止まるので、連絡に要るものだけを選びます。許可アプリとは別の一覧です。縁側を許可アプリに入れているときは、ここにも入れてください。")
+                .foregroundStyle(Theme.ink3)
+        }
+        .familyActivityPicker(isPresented: $showSuperPicker, selection: $model.superSelection)
+        .onChange(of: model.superSelection) { _, s in model.saveSuperSelection(s) }
     }
 
     /// オンで差し引き（excludeAllowed）・オフで許可アプリ込み（inclusive）

@@ -19,6 +19,7 @@ struct DeveloperView: View {
                 LabeledContent("ロック", value: model.shielded ? "掛かっている" : "外れている")
                 LabeledContent("手動ロック（サーバー）", value: Store.manualLock ? "あり" : "なし")
                 LabeledContent("ロックの理由", value: model.status.reason.rawValue)
+                LabeledContent("スーパーロック", value: model.status.superLockUntil ?? "なし")
                 LabeledContent("時間解除", value: model.status.unlockUntil.map { "\($0)（\(model.status.unlockSource ?? "?")）" } ?? "なし")
                 LabeledContent("解除の記録（未送信）", value: "\(Unlocks.pendingCount) 件")
                 LabeledContent("反映済みの版", value: "\(Store.appliedVersion)")

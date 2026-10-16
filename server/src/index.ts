@@ -9,6 +9,7 @@
 //   GET  /events?since=ISO            記録を返す
 //   POST /unlocks                     縁側アプリからの時間解除（理由つき）を記録する（2026-10-14 足し算）
 //                                     kind: all（全体）| apps（アプリ個別・appCount つき）は同日さらに足し算。無ければ all
+//                                     superLock: true（スーパーロック中の解除の印）は 2026-10-16 足し算。無ければふだんの解除
 //   GET  /unlocks?since=ISO&limit=N   解除の履歴（新しい順）
 //   GET  /                            最小のボタンページ（トークンは URL のフラグメント #<token> で渡す）
 
@@ -277,6 +278,8 @@ async function postUnlock(req: Request, env: Env) {
     return json({ error: "kind は all|apps" }, 400);
   }
   const kind = typeof b.kind === "string" ? b.kind : "all";
+  // スーパーロック中の解除の印（古いアプリは送らない。true のときだけ 1）
+  const superLock = b.superLock === true ? 1 : null;
   let appCount: number | null = null;
   if (kind === "apps") {
     appCount = int(b.appCount);
@@ -284,10 +287,10 @@ async function postUnlock(req: Request, env: Env) {
   }
 
   const res = await env.DB.prepare(
-    `INSERT OR IGNORE INTO unlocks (id, at, received_at, minutes, until, reason, lock_reason, used_minutes, quota_minutes, source, kind, app_count)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'app', ?, ?)`,
+    `INSERT OR IGNORE INTO unlocks (id, at, received_at, minutes, until, reason, lock_reason, used_minutes, quota_minutes, source, kind, app_count, super_lock)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'app', ?, ?, ?)`,
   )
-    .bind(id, at, nowIso(), minutes, until, reason, lockReason, usedMinutes, quotaMinutes, kind, appCount)
+    .bind(id, at, nowIso(), minutes, until, reason, lockReason, usedMinutes, quotaMinutes, kind, appCount, superLock)
     .run();
   const inserted = res.meta.changes ?? 0;
   if (inserted > 0) {
@@ -295,7 +298,8 @@ async function postUnlock(req: Request, env: Env) {
       route: "app",
       ok: true,
       detail: `minutes=${minutes} until=${until} lockReason=${lockReason ?? "?"} kind=${kind}`
-        + (appCount !== null ? ` apps=${appCount}` : ""),
+        + (appCount !== null ? ` apps=${appCount}` : "")
+        + (superLock ? " superLock" : ""),
     });
   }
   return json({ ok: true, inserted, id });
@@ -310,7 +314,8 @@ async function getUnlocks(url: URL, env: Env) {
   const { results } = await env.DB.prepare(
     `SELECT id, at, received_at AS receivedAt, minutes, until, reason, lock_reason AS lockReason,
             used_minutes AS usedMinutes, quota_minutes AS quotaMinutes, source,
-            COALESCE(kind, 'all') AS kind, app_count AS appCount
+            COALESCE(kind, 'all') AS kind, app_count AS appCount,
+            CASE WHEN super_lock = 1 THEN 1 ELSE 0 END AS superLock
      FROM unlocks WHERE julianday(at) >= julianday(?) ORDER BY julianday(at) DESC LIMIT ?`,
   )
     .bind(since, limit)

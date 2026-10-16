@@ -3,7 +3,8 @@ import FamilyControls
 
 // 普段使いのホーム（1画面）。上に縁側からの景色、その下に見るもの、いちばん下に触るもの。
 //   ロック中かどうか（理由・時間解除の残り）→ 今日の使用時間と残りの枠 → 個別に解除中 → 代わりにやりたいこと
-//   下のボタン: ロック中は アプリを選んで解除／解除する／いまからロック、使えるときは いまからロック
+//   下のボタン: ロック中は アプリを選んで解除／解除する／いまからロック／スーパーロック、使えるときは いまからロック／スーパーロック
+//   スーパーロック中の解除（全体・アプリ個別）は、書き写し＋理由・10分固定（SuperLock.swift・CopyField.swift）
 // 見た目は design/mock/index.html が正（色・書体・部品は Theme.swift）
 
 struct HomeView: View {
@@ -11,6 +12,9 @@ struct HomeView: View {
     @State private var showUnlock = false
     @State private var showAppUnlock = false
     @State private var showSelfLock = false
+    @State private var showSuperLock = false
+    /// 見た目の確認用（-engawaUIDemo super-unlock-reason）: 書き写しを済ませた段で出す
+    @State private var superCopiedDemo = false
     /// 見た目の確認用（-engawaUIDemo selflock-custom）: 時間の指定を開いた状態で出す
     @State private var selfLockCustomDemo = false
 
@@ -53,12 +57,22 @@ struct HomeView: View {
         }
         .refreshable { model.syncOnForeground() }
         .sheet(isPresented: $showUnlock) {
-            UnlockView()
+            UnlockView(superMode: model.superLockActive, initiallyCopied: superCopiedDemo)
                 .environmentObject(model)
         }
         .sheet(isPresented: $showAppUnlock) {
-            AppUnlockView()
+            AppUnlockView(superMode: model.superLockActive)
                 .environmentObject(model)
+        }
+        .sheet(isPresented: $showSuperLock) {
+            SelfLockSheet(title: superLockTitle, message: superLockMessage, start: { c in
+                model.startSuperLock(c)
+            }, startMinutes: { m in
+                model.startSuperLock(minutes: m)
+            }, initiallyCustom: selfLockCustomDemo,
+               header: "スーパーロック",
+               lead: "ふだんの許可アプリも止めて、設定の「スーパーロックで残すアプリ」だけを使えるようにします。途中で使うときは、文を1つ書き写して理由を書くと10分だけ解除できます。",
+               verb: "スーパーロックする")
         }
         .sheet(isPresented: $showSelfLock) {
             SelfLockSheet(title: selfLockTitle, message: selfLockMessage, start: { c in
@@ -74,6 +88,10 @@ struct HomeView: View {
             case "apps": showAppUnlock = true
             case "selflock": showSelfLock = true
             case "selflock-custom": selfLockCustomDemo = true; showSelfLock = true
+            case "superlock-sheet": showSuperLock = true
+            case "super-unlock": showUnlock = true
+            case "super-unlock-reason": superCopiedDemo = true; showUnlock = true
+            case "super-apps": showAppUnlock = true
             default: break
             }
         }
@@ -137,7 +155,7 @@ struct HomeView: View {
                 headline("解除中", dot: Theme.gold)
                 Text("残り \(Text(remaining(until)).fontWeight(.semibold).foregroundStyle(Theme.ink))（\(Self.time.string(from: until)) まで）")
                     .font(.subheadline).foregroundStyle(Theme.ink2).monospacedDigit()
-                Text("終わると戻ります: \(st.reason.label(selfUntil: model.selfLockUntil))")
+                Text("終わると戻ります: \(model.lockLabel)")
                     .noteStyle()
                     .fixedSize(horizontal: false, vertical: true)
             } else {
@@ -180,8 +198,8 @@ struct HomeView: View {
     /// ロックの理由。枠だけのときは、いつ戻るかも添える
     private var lockedSubtitle: String {
         let st = model.status
-        var s = st.reason.label(selfUntil: model.selfLockUntil)
-        if st.reason == .quota {
+        var s = model.lockLabel
+        if st.reason == .quota && model.superLockUntil == nil {
             s = "今日の枠を使い切りました。"
             let next = Quota.nextReset()
             let day = Calendar.current.isDateInToday(next) ? "" : "明日 "
@@ -302,14 +320,20 @@ struct HomeView: View {
             if model.status.locked {
                 Button("アプリを選んで解除") { showAppUnlock = true }
                     .buttonStyle(SecondaryButtonStyle())
-                Button("解除する") { showUnlock = true }
+                Button(model.superLockActive ? "\(SuperLock.unlockMinutes)分だけ解除する" : "解除する") { showUnlock = true }
                     .buttonStyle(PrimaryButtonStyle())
                 Button(model.selfLockUntil == nil ? "いまからロック" : "セルフロックを延ばす") { showSelfLock = true }
+                    .buttonStyle(PlainWoodButtonStyle())
+                    .disabled(model.authStatus != .approved)
+                superLockButton
                     .buttonStyle(PlainWoodButtonStyle())
                     .disabled(model.authStatus != .approved)
             } else {
                 Button(model.selfLockUntil == nil ? "いまからロック" : "セルフロックを延ばす") { showSelfLock = true }
                     .buttonStyle(PrimaryButtonStyle())
+                    .disabled(model.authStatus != .approved)
+                superLockButton
+                    .buttonStyle(SecondaryButtonStyle())
                     .disabled(model.authStatus != .approved)
             }
         }
@@ -327,7 +351,30 @@ struct HomeView: View {
         )
     }
 
+    /// 「いまからロック」のすぐ下
+    private var superLockButton: some View {
+        Button(model.superLockActive ? "スーパーロックを延ばす" : "スーパーロック") { showSuperLock = true }
+    }
+
     // MARK: -
+
+    private var superLockTitle: String {
+        model.superLockUntil.map { "スーパーロック中（\(Self.time.string(from: $0))まで）。延ばしますか" } ?? "スーパーロックをかけますか"
+    }
+
+    private var superLockMessage: String {
+        let keep = model.superSelection.applicationTokens.count
+        var lines = [keep == 0
+                     ? "残すアプリがまだありません（設定で選べます）。電話・メッセージなど iOS が止めないもの以外は、すべて止まります。"
+                     : "残すアプリは \(keep)個です。選んだ時間が来ると自動で終わり、元のロックに戻ります。"]
+        if model.superLockUntil != nil {
+            lines.append("今の終わりより短くはなりません（短い時間を選んだときは何も変えません）。")
+        }
+        if model.unlockUntil != nil || !model.appUnlocks.isEmpty {
+            lines.append("解除中の時間・個別の解除は終わりにします。")
+        }
+        return lines.joined(separator: "\n")
+    }
 
     private var selfLockTitle: String {
         model.selfLockUntil.map { "セルフロック中（\(Self.time.string(from: $0))まで）。延ばしますか" } ?? "いまからロックしますか"
@@ -375,6 +422,10 @@ struct SelfLockSheet: View {
     var start: (SelfLock.Choice) -> Void
     var startMinutes: (Int) -> Void
     var initiallyCustom = false
+    /// スーパーロックでも同じシートを使う（2026-10-16: 時間の選び方は「いまからロック」と同じ）
+    var header = "いまからロック"
+    var lead = "時間が来なくても、自分でロックをかけます。途中で使うときは、ふだんどおり理由を書いて解除します。"
+    var verb = "ロックする"
     @Environment(\.dismiss) private var dismiss
     @State private var custom = false
     @State private var hours = 0
@@ -385,12 +436,12 @@ struct SelfLockSheet: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                SheetHeader(title: "いまからロック") { dismiss() }
+                SheetHeader(title: header) { dismiss() }
                 Text(title)
                     .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
                     .padding(.top, 6)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("時間が来なくても、自分でロックをかけます。途中で使うときは、ふだんどおり理由を書いて解除します。\n" + message)
+                Text(lead + "\n" + message)
                     .font(.subheadline).foregroundStyle(Theme.ink2)
                     .lineSpacing(3)
                     .padding(.top, 6)
@@ -489,8 +540,8 @@ struct SelfLockSheet: View {
                 startMinutes(total)
                 dismiss()
             } label: {
-                Text(result.map { "\(AppSettings.duration($0.clamped ? toReset : total)) ロックする（\(LockReason.clock.string(from: $0.until))まで）" }
-                     ?? "ロックする").monospacedDigit()
+                Text(result.map { "\(AppSettings.duration($0.clamped ? toReset : total)) \(verb)（\(LockReason.clock.string(from: $0.until))まで）" }
+                     ?? verb).monospacedDigit()
             }
             .buttonStyle(PrimaryButtonStyle())
             .disabled(result == nil)
@@ -500,48 +551,47 @@ struct SelfLockSheet: View {
 }
 
 /// 解除: 理由を一言（必須）＋時間を選ぶ。
-/// ⚠️ IME の確定の Enter で送らない: 送信は「解除する」ボタンだけ（onSubmit を付けない・複数行の欄で Return は改行）
+/// スーパーロック中（superMode）は、先にランダムな1文の書き写し（完全一致）→ 理由 → 10分固定（選べない）。
+/// ⚠️ IME の確定の Enter で送らない: 送信は「解除する」「次へ」ボタンだけ（onSubmit を付けない・複数行の欄で Return は改行）
 struct UnlockView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    var superMode = false
+    /// 見た目の確認用（UIDemo）: 書き写しを済ませた段から出す
+    var initiallyCopied = false
     @State private var reason = ""
     @State private var minutes = 15
+    @State private var sentence = SuperLock.pick()
+    @State private var copyPassed = false
+    @State private var copied = false
     @FocusState private var focused: Bool
 
     private var trimmed: String { reason.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var effectiveMinutes: Int { superMode ? SuperLock.unlockMinutes : minutes }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 SheetHeader(title: "解除する") { dismiss() }
-                Text("少しだけ開けますね。なにをしたいか、ひとこと残してください。")
+                Text(superMode
+                     ? (copied ? "書き写せました。なにをしたいか、ひとこと残してください。"
+                               : "スーパーロック中です。下の文を一字一句そのまま打つと、\(SuperLock.unlockMinutes)分だけ解除できます。")
+                     : "少しだけ開けますね。なにをしたいか、ひとこと残してください。")
                     .font(.subheadline).foregroundStyle(Theme.ink2)
                     .lineSpacing(3)
                     .padding(.top, 6)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("いまのロック: \(model.status.reason.label)")
+                Text("いまのロック: \(model.lockLabel)")
                     .font(.caption).foregroundStyle(Theme.ink3)
                     .padding(.top, 4)
                     .fixedSize(horizontal: false, vertical: true)
 
-                FieldLabel(title: "理由", trailing: "必須")
-                    .padding(.top, 22)
-                ReasonField(text: $reason, placeholder: "例: 地図で道を調べる")
-                    .focused($focused)
-                    .padding(.top, 8)
-                if Unlocks.reasonLength(reason) > Unlocks.reasonLimit {
-                    Text("\(Unlocks.reasonLimit)字までにしてください").font(.footnote).foregroundStyle(Theme.danger)
-                        .padding(.top, 6)
+                if superMode && !copied {
+                    CopyGate(sentence: sentence, passed: $copyPassed)
+                        .padding(.top, 22)
+                } else {
+                    reasonAndTime
                 }
-                Text("理由は記録に残り、止めるアプリや枠の見直しに使います。")
-                    .font(.caption).foregroundStyle(Theme.ink3)
-                    .padding(.top, 6)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                FieldLabel(title: "時間")
-                    .padding(.top, 22)
-                MinuteSegment(choices: Unlocks.minuteChoices, selection: $minutes)
-                    .padding(.top, 8)
             }
             .padding(.horizontal, Theme.sideMargin)
             .padding(.top, 22)
@@ -550,24 +600,93 @@ struct UnlockView: View {
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            Button {
-                model.unlock(minutes: minutes, reason: reason)
-                dismiss()
-            } label: {
-                Text("\(minutes)分 解除する").monospacedDigit()
+            Group {
+                if superMode && !copied {
+                    Button("次へ") {
+                        withAnimation(.easeOut(duration: 0.2)) { copied = true }
+                    }
+                    .disabled(!copyPassed)
+                } else {
+                    Button {
+                        model.unlock(minutes: effectiveMinutes, reason: reason)
+                        dismiss()
+                    } label: {
+                        Text("\(effectiveMinutes)分 解除する").monospacedDigit()
+                    }
+                    .disabled(trimmed.isEmpty || Unlocks.reasonLength(reason) > Unlocks.reasonLimit)
+                }
             }
             .buttonStyle(PrimaryButtonStyle())
-            .disabled(trimmed.isEmpty || Unlocks.reasonLength(reason) > Unlocks.reasonLimit)
             .padding(.horizontal, Theme.sideMargin)
             .padding(.top, 10)
             .padding(.bottom, 8)
             .background(Theme.paper)
         }
-        .presentationDetents([.fraction(0.72), .large])
+        .presentationDetents(superMode ? [.large] : [.fraction(0.72), .large])
         .presentationDragIndicator(.visible)
         .presentationBackground(Theme.paper)
         .presentationCornerRadius(28)
-        .onAppear { focused = true }
+        .onAppear {
+            if initiallyCopied { copied = true }
+            if !superMode { focused = true }
+        }
+        .onChange(of: copied) { _, c in if c { focused = true } }
+    }
+
+    @ViewBuilder
+    private var reasonAndTime: some View {
+        FieldLabel(title: "理由", trailing: "必須")
+            .padding(.top, 22)
+        ReasonField(text: $reason, placeholder: "例: 地図で道を調べる")
+            .focused($focused)
+            .padding(.top, 8)
+        if Unlocks.reasonLength(reason) > Unlocks.reasonLimit {
+            Text("\(Unlocks.reasonLimit)字までにしてください").font(.footnote).foregroundStyle(Theme.danger)
+                .padding(.top, 6)
+        }
+        Text(superMode ? "理由は記録に残ります（スーパーロック中の解除として印が付きます）。"
+                       : "理由は記録に残り、止めるアプリや枠の見直しに使います。")
+            .font(.caption).foregroundStyle(Theme.ink3)
+            .padding(.top, 6)
+            .fixedSize(horizontal: false, vertical: true)
+
+        FieldLabel(title: "時間")
+            .padding(.top, 22)
+        if superMode {
+            FixedMinutes(minutes: SuperLock.unlockMinutes)
+                .padding(.top, 8)
+        } else {
+            MinuteSegment(choices: Unlocks.minuteChoices, selection: $minutes)
+                .padding(.top, 8)
+        }
+    }
+}
+
+/// スーパーロック中の時間（選べない）。MinuteSegment の溝に1つだけ置いた形
+struct FixedMinutes: View {
+    let minutes: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text("\(minutes)").font(.system(.body, weight: .semibold)).monospacedDigit()
+                Text("分").font(.system(.caption, weight: .medium))
+            }
+            .foregroundStyle(Theme.ink)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Theme.card)
+                    .shadow(color: Color(hex: 0x3C2814).opacity(0.14), radius: 2, y: 1)
+            )
+            .padding(4)
+            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.paper2))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(minutes)分（選べません）")
+            Text("スーパーロック中の解除は\(minutes)分だけです。過ぎると自動でスーパーロックに戻ります。")
+                .font(.caption).foregroundStyle(Theme.ink3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 
@@ -588,10 +707,15 @@ struct FieldLabel: View {
 }
 
 /// アプリ個別の解除: アプリを選ぶ（ロックされているものを1つ以上）→ 理由（必須）→ 時間。
-/// ⚠️ IME の確定の Enter で送らない: 送信は「解除する」ボタンだけ（onSubmit を付けない・複数行の欄で Return は改行）
+/// スーパーロック中（superMode）は、先にランダムな1文の書き写し（完全一致）→ アプリ → 理由 → 10分固定（全体の解除と同じ手間）。
+/// ⚠️ IME の確定の Enter で送らない: 送信は「解除する」「次へ」ボタンだけ（onSubmit を付けない・複数行の欄で Return は改行）
 struct AppUnlockView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    var superMode = false
+    @State private var sentence = SuperLock.pick()
+    @State private var copyPassed = false
+    @State private var copied = false
     @State private var pick = FamilyActivitySelection()
     @State private var showPicker = false
     @State private var reason = ""
@@ -600,65 +724,24 @@ struct AppUnlockView: View {
 
     private var trimmed: String { reason.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var check: AppUnlocks.Check { AppUnlocks.check(pick) }
+    private var effectiveMinutes: Int { superMode ? SuperLock.unlockMinutes : minutes }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 SheetHeader(title: "アプリを選んで解除") { dismiss() }
 
-                FieldLabel(title: "解除するアプリ（\(check.targets.count)個）")
-                    .padding(.top, 18)
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(check.targets), id: \.self) { token in
-                        Label(token)
-                            .foregroundStyle(Theme.ink)
-                            .padding(.vertical, 10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Rectangle().fill(Theme.line).frame(height: 0.5)
-                    }
-                    Button(pick.applicationTokens.isEmpty ? "アプリを選ぶ…" : "選び直す…") { showPicker = true }
-                        .font(.system(.body, weight: .medium))
-                        .foregroundStyle(Theme.wood)
-                        .padding(.vertical, 12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                        .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 16)
-                .paperCard(radius: 14)
-                .padding(.top, 8)
-                ForEach(check.notes, id: \.self) { n in
-                    Text(n).font(.footnote).foregroundStyle(Theme.caution)
+                if superMode && !copied {
+                    Text("スーパーロック中です。下の文を一字一句そのまま打つと、選んだアプリを\(SuperLock.unlockMinutes)分だけ解除できます。")
+                        .font(.subheadline).foregroundStyle(Theme.ink2)
+                        .lineSpacing(3)
                         .padding(.top, 6)
                         .fixedSize(horizontal: false, vertical: true)
+                    CopyGate(sentence: sentence, passed: $copyPassed)
+                        .padding(.top, 22)
+                } else {
+                    pickReasonTime
                 }
-                if let e = check.error, !(pick.applicationTokens.isEmpty && pick.categoryTokens.isEmpty && pick.webDomainTokens.isEmpty) {
-                    Text(e).font(.footnote).foregroundStyle(Theme.danger)
-                        .padding(.top, 6)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Text("ロックされているアプリを1つ以上、アプリごとに選びます。カテゴリで選ぶと個別の解除になりません。")
-                    .font(.caption).foregroundStyle(Theme.ink3)
-                    .padding(.top, 6)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                FieldLabel(title: "理由", trailing: "必須")
-                    .padding(.top, 22)
-                ReasonField(text: $reason, placeholder: "例: 地図で道を調べる")
-                    .padding(.top, 8)
-                if Unlocks.reasonLength(reason) > Unlocks.reasonLimit {
-                    Text("\(Unlocks.reasonLimit)字までにしてください").font(.footnote).foregroundStyle(Theme.danger)
-                        .padding(.top, 6)
-                }
-                Text("理由は記録に残ります。アプリ名は記録に送らず、数だけ送ります。")
-                    .font(.caption).foregroundStyle(Theme.ink3)
-                    .padding(.top, 6)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                FieldLabel(title: "時間")
-                    .padding(.top, 22)
-                MinuteSegment(choices: Unlocks.minuteChoices, selection: $minutes)
-                    .padding(.top, 8)
             }
             .padding(.horizontal, Theme.sideMargin)
             .padding(.top, 22)
@@ -668,17 +751,25 @@ struct AppUnlockView: View {
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 6) {
-                Button {
-                    if let e = model.unlockApps(pick, minutes: minutes, reason: reason) {
-                        error = e
-                    } else {
-                        dismiss()
+                if superMode && !copied {
+                    Button("次へ") {
+                        withAnimation(.easeOut(duration: 0.2)) { copied = true }
                     }
-                } label: {
-                    Text("\(check.targets.count)個のアプリを\(minutes)分 解除する").monospacedDigit()
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(!copyPassed)
+                } else {
+                    Button {
+                        if let e = model.unlockApps(pick, minutes: effectiveMinutes, reason: reason) {
+                            error = e
+                        } else {
+                            dismiss()
+                        }
+                    } label: {
+                        Text("\(check.targets.count)個のアプリを\(effectiveMinutes)分 解除する").monospacedDigit()
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(!check.ok || trimmed.isEmpty || Unlocks.reasonLength(reason) > Unlocks.reasonLimit)
                 }
-                .buttonStyle(PrimaryButtonStyle())
-                .disabled(!check.ok || trimmed.isEmpty || Unlocks.reasonLength(reason) > Unlocks.reasonLimit)
                 if let error {
                     Text(error).font(.footnote).foregroundStyle(Theme.danger)
                         .fixedSize(horizontal: false, vertical: true)
@@ -695,5 +786,67 @@ struct AppUnlockView: View {
         .presentationCornerRadius(28)
         .familyActivityPicker(isPresented: $showPicker, selection: $pick)
         .onChange(of: pick) { _, _ in error = nil }
+    }
+
+    @ViewBuilder
+    private var pickReasonTime: some View {
+        FieldLabel(title: "解除するアプリ（\(check.targets.count)個）")
+            .padding(.top, 18)
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(check.targets), id: \.self) { token in
+                Label(token)
+                    .foregroundStyle(Theme.ink)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Rectangle().fill(Theme.line).frame(height: 0.5)
+            }
+            Button(pick.applicationTokens.isEmpty ? "アプリを選ぶ…" : "選び直す…") { showPicker = true }
+                .font(.system(.body, weight: .medium))
+                .foregroundStyle(Theme.wood)
+                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .paperCard(radius: 14)
+        .padding(.top, 8)
+        ForEach(check.notes, id: \.self) { n in
+            Text(n).font(.footnote).foregroundStyle(Theme.caution)
+                .padding(.top, 6)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if let e = check.error, !(pick.applicationTokens.isEmpty && pick.categoryTokens.isEmpty && pick.webDomainTokens.isEmpty) {
+            Text(e).font(.footnote).foregroundStyle(Theme.danger)
+                .padding(.top, 6)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        Text("ロックされているアプリを1つ以上、アプリごとに選びます。カテゴリで選ぶと個別の解除になりません。")
+            .font(.caption).foregroundStyle(Theme.ink3)
+            .padding(.top, 6)
+            .fixedSize(horizontal: false, vertical: true)
+
+        FieldLabel(title: "理由", trailing: "必須")
+            .padding(.top, 22)
+        ReasonField(text: $reason, placeholder: "例: 地図で道を調べる")
+            .padding(.top, 8)
+        if Unlocks.reasonLength(reason) > Unlocks.reasonLimit {
+            Text("\(Unlocks.reasonLimit)字までにしてください").font(.footnote).foregroundStyle(Theme.danger)
+                .padding(.top, 6)
+        }
+        Text("理由は記録に残ります。アプリ名は記録に送らず、数だけ送ります。")
+            .font(.caption).foregroundStyle(Theme.ink3)
+            .padding(.top, 6)
+            .fixedSize(horizontal: false, vertical: true)
+
+        FieldLabel(title: "時間")
+            .padding(.top, 22)
+        if superMode {
+            FixedMinutes(minutes: SuperLock.unlockMinutes)
+                .padding(.top, 8)
+        } else {
+            MinuteSegment(choices: Unlocks.minuteChoices, selection: $minutes)
+                .padding(.top, 8)
+        }
     }
 }

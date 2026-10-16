@@ -13,15 +13,16 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         wake("intervalDidStart", activity)
         if activity == .relock {
             relock()
-        } else if activity == .appRelock || activity == .selfLockEnd {
-            // 個別解除・セルフロックの終わり。少し早く呼ばれても外せるよう2分の余裕を見て決め直し、
+        } else if activity == .appRelock || activity == .selfLockEnd || activity == .superLockEnd {
+            // 個別解除・セルフロック・スーパーロックの終わり（スーパーロックが終われば例外が許可アプリに戻る）。少し早く呼ばれても外せるよう2分の余裕を見て決め直し、
             // まだ先の期限が残っていればそこへ登録し直す（force: 少し早すぎて対象が変わらなかったとき用）
             let st = Shield.reconcile(route: activity.rawValue, grace: 120)
             Wake.armExpiryWakes(route: activity.rawValue, force: true)
             Log.add(LogRecord(kind: activity.rawValue, route: activity.rawValue, version: Store.appliedVersion,
                               locked: st.locked, appliedAt: ISO.now, ok: Shield.isShielded == st.locked,
                               detail: "reason=\(st.reason.rawValue) appUnlocks=\(st.appUnlockCount ?? 0)"
-                                  + (st.selfLockUntil.map { " selfLockUntil=\($0)" } ?? "")))
+                                  + (st.selfLockUntil.map { " selfLockUntil=\($0)" } ?? "")
+                                  + (st.superLockUntil.map { " superLockUntil=\($0)" } ?? "")))
         } else if activity == .daily {
             // リセット時刻: 使用時間を0に戻し、枠ロックを外す（手動ロック・時間解除はそのまま）
             Quota.startNewPeriod()
@@ -104,6 +105,7 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         case .daily: return "daily"
         case .appRelock: return "appRelock"
         case .selfLockEnd: return "selfLockEnd"
+        case .superLockEnd: return "superLockEnd"
         default: return activity.rawValue
         }
     }

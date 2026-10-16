@@ -21,6 +21,8 @@ struct UnlockRecord: Codable, Equatable {
     var kind: String? = nil
     /// 個別解除の対象のアプリ数（アプリ名はトークンが不透明で読めないので、サーバーへは数だけ）
     var appCount: Int? = nil
+    /// スーパーロック中の解除（書き写し＋理由・10分固定）なら true（2026-10-16 足し算）。それ以外は送らない
+    var superLock: Bool? = nil
 
     static let kindAll = "all"
     static let kindApps = "apps"

@@ -67,7 +67,8 @@ struct RootView: View {
 #if DEBUG
 /// 見た目の確認用（シミュレータでスクリーンショットを撮るため）。`-engawaUIDemo <mode>` で起動したときだけ、
 /// 表示用の状態を画面の model にだけ入れ、同期・見回り・許可の要求・通知の登録をしない（シミュレータ用）。
-/// mode: usable／locked／unlocked／selflock／selflock-custom／sheet／apps／settings。Debug ビルドだけ
+/// mode: usable／locked／unlocked／selflock／selflock-custom／sheet／apps／settings／
+///       superlock／superlock-sheet／super-unlock／super-unlock-reason／super-apps（スーパーロック・2026-10-16）。Debug ビルドだけ
 enum UIDemo {
     static let mode: String? = UserDefaults.standard.string(forKey: "engawaUIDemo")
 
@@ -90,6 +91,11 @@ enum UIDemo {
             model.status = LockStatus(locked: false, reason: .quota, unlockUntil: ISO.string(now.addingTimeInterval(12 * 60)),
                                       unlockSource: "app", updatedAt: ISO.now)
             model.idea = Idea(title: "縁側でお茶を淹れる", subtitle: "")
+        case "superlock", "super-unlock", "super-unlock-reason", "super-apps":
+            model.usage = UsageState(periodStart: ISO.now, allMin: 48)
+            model.status = LockStatus(locked: true, reason: .none, unlockUntil: nil, unlockSource: nil, updatedAt: ISO.now,
+                                      superLockUntil: ISO.string(now.addingTimeInterval(2 * 3600)))
+            model.idea = Idea(title: "本を10ページ読む", subtitle: "読みかけの本を開いてみませんか。10ページで止めてもいい。")
         case "selflock":
             model.usage = UsageState(periodStart: ISO.now, allMin: 48)
             model.status = LockStatus(locked: true, reason: .selfLock, unlockUntil: nil, unlockSource: nil, updatedAt: ISO.now,

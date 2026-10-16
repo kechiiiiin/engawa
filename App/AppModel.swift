@@ -9,6 +9,8 @@ final class AppModel: ObservableObject {
     // --- 普段使い ---
     @Published var authStatus: AuthorizationStatus = AuthorizationCenter.shared.authorizationStatus
     @Published var selection: FamilyActivitySelection = Shield.loadSelection()
+    /// スーパーロックで残すアプリ（ふだんの許可アプリとは別の一覧）
+    @Published var superSelection: FamilyActivitySelection = SuperLock.loadSelection()
     @Published var status: LockStatus = Shield.status
     @Published var usage: UsageState = Quota.usage()
     @Published var settings: AppSettings = Store.settings
@@ -40,6 +42,17 @@ final class AppModel: ObservableObject {
     var quotaExhausted: Bool { Quota.isExhausted(usage, settings: settings) }
     var unlockUntil: Date? { status.unlockUntil.flatMap(ISO.parse) }
     var selfLockUntil: Date? { status.selfLockUntil.flatMap(ISO.parse) }
+    var superLockUntil: Date? { status.superLockUntil.flatMap(ISO.parse) }
+    /// スーパーロック中か（解除は書き写し＋理由・10分固定になる）
+    var superLockActive: Bool { superLockUntil.map { $0 > Date() } ?? false }
+
+    /// ロックの理由の言葉（スーパーロックを先頭に足す。LockReason はスーパーロックを持たない）
+    var lockLabel: String {
+        var parts: [String] = []
+        if let s = superLockUntil { parts.append("スーパーロック（\(LockReason.clock.string(from: s))まで）") }
+        if status.reason != .none || parts.isEmpty { parts.append(status.reason.label(selfUntil: selfLockUntil)) }
+        return parts.joined(separator: "・")
+    }
 
     /// ホームの表示を App Group から読み直す（軽い）
     func refreshHome() {
@@ -98,6 +111,7 @@ final class AppModel: ObservableObject {
         let now = Date()
         let expired = (Store.unlockUntil.map { $0 <= now } ?? false)
             || (Store.selfLockUntil.map { $0 <= now } ?? false)
+            || (Store.superLockUntil.map { $0 <= now } ?? false)
             || AppUnlocks.all.contains { $0.untilDate <= now }
         if expired { Shield.reconcile(route: "sync-fallback") }
         refreshHome()
@@ -105,10 +119,12 @@ final class AppModel: ObservableObject {
 
     // MARK: 解除（理由＋時間）
 
-    func unlock(minutes: Int, reason: String) {
+    /// スーパーロック中は10分固定（Shield 側でも10分にそろえる。書き写しは画面で済ませてから呼ぶ）
+    func unlock(minutes requested: Int, reason: String) {
         let r = Unlocks.normalizeReason(reason)
-        guard !r.isEmpty, Unlocks.minuteChoices.contains(minutes) else { return }
-        Shield.unlockFromApp(minutes: minutes, reason: r)
+        guard !r.isEmpty, Unlocks.minuteChoices.contains(requested) || requested == SuperLock.unlockMinutes else { return }
+        let rec = Shield.unlockFromApp(minutes: requested, reason: r)
+        let minutes = rec.minutes
         refreshHome()
         unlockMessage = "\(minutes)分 解除しました"
         DispatchQueue.global().async {
@@ -124,14 +140,15 @@ final class AppModel: ObservableObject {
     // MARK: 個別解除（アプリを選ぶ＋理由＋時間）
 
     /// 断るときは理由を返す（画面に出す）。済んだら nil
-    func unlockApps(_ pick: FamilyActivitySelection, minutes: Int, reason: String) -> String? {
+    func unlockApps(_ pick: FamilyActivitySelection, minutes requested: Int, reason: String) -> String? {
         let r = Unlocks.normalizeReason(reason)
         guard !r.isEmpty else { return "理由を書いてください。" }
-        guard Unlocks.minuteChoices.contains(minutes) else { return "時間を選んでください。" }
-        switch Shield.unlockAppsFromApp(pick, minutes: minutes, reason: r) {
+        guard Unlocks.minuteChoices.contains(requested) || requested == SuperLock.unlockMinutes else { return "時間を選んでください。" }
+        switch Shield.unlockAppsFromApp(pick, minutes: requested, reason: r) {
         case .failure(let e):
             return e.message
         case .success(let rec):
+            let minutes = rec.minutes
             refreshHome()
             let n = rec.appCount ?? 0
             unlockMessage = "\(n)個のアプリを\(minutes)分 解除しました"
@@ -176,6 +193,45 @@ final class AppModel: ObservableObject {
             Log.flush()
             DispatchQueue.main.async { self.refresh() }
         }
+    }
+
+    // MARK: スーパーロック（残すアプリだけを使えるロック）
+
+    func startSuperLock(_ choice: SelfLock.Choice) {
+        startSuperLock(until: choice.until(), choice: choice.rawValue)
+    }
+
+    /// 時間を指定（分）。選び方はいまからロックと同じ（5分刻み・リセットを越える指定はリセットまで）
+    func startSuperLock(minutes: Int) {
+        guard let c = SelfLock.customUntil(minutes: minutes) else {
+            unlockMessage = "\(SelfLock.customMinimum)分以上を選んでください（リセットまで\(SelfLock.customMinimum)分も無いときは指定できません）"
+            return
+        }
+        startSuperLock(until: c.until, choice: "custom-\(minutes)m" + (c.clamped ? "-toReset" : ""))
+    }
+
+    private func startSuperLock(until: Date, choice: String) {
+        let before = Store.superLockUntil
+        Shield.startSuperLock(until: until, choice: choice)
+        refreshHome()
+        let end = Store.superLockUntil ?? until
+        if let before, before >= until {
+            unlockMessage = "すでに \(LockReason.clock.string(from: before)) までスーパーロック中です（短くはせず、解除中のものもそのままです）"
+        } else {
+            unlockMessage = "\(LockReason.clock.string(from: end)) までスーパーロックしました"
+        }
+        DispatchQueue.global().async {
+            Log.flush()
+            DispatchQueue.main.async { self.refresh() }
+        }
+    }
+
+    func saveSuperSelection(_ s: FamilyActivitySelection) {
+        SuperLock.saveSelection(s)
+        Log.add(kind: "superSelection", detail: "apps=\(s.applicationTokens.count) domains=\(s.webDomainTokens.count) cats=\(s.categoryTokens.count)")
+        // スーパーロック中なら残すアプリを入れ直して掛け直す
+        if SuperLock.isActive() { Shield.reconcile(route: "superSelection", force: true) }
+        refresh()
     }
 
     // MARK: 設定

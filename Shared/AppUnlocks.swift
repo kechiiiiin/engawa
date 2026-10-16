@@ -131,8 +131,11 @@ enum AppUnlocks {
         var ok: Bool { error == nil && !targets.isEmpty }
     }
 
-    static func check(_ pick: FamilyActivitySelection, allowed: FamilyActivitySelection = Shield.loadSelection(),
+    /// allowed: ロック中も使える土台（スーパーロック中は残すアプリ。Shield.baseSelection）
+    static func check(_ pick: FamilyActivitySelection, allowed given: FamilyActivitySelection? = nil,
                       now: Date = Date()) -> Check {
+        let allowed = given ?? Shield.baseSelection(now)
+        let allowedName = SuperLock.isActive(now) ? "スーパーロックで残すアプリ" : "許可アプリ"
         var notes: [String] = []
         if !pick.categoryTokens.isEmpty {
             notes.append("カテゴリで選んだもの（\(pick.categoryTokens.count)件）は個別の解除になりません。アプリを1つずつ選んでください。")
@@ -142,7 +145,7 @@ enum AppUnlocks {
         }
         let alreadyAllowed = pick.applicationTokens.intersection(allowed.applicationTokens)
         if !alreadyAllowed.isEmpty {
-            notes.append("許可アプリ（\(alreadyAllowed.count)個）はロック中も使えるので数えません。")
+            notes.append("\(allowedName)（\(alreadyAllowed.count)個）はロック中も使えるので数えません。")
         }
         let targets = pick.applicationTokens.subtracting(allowed.applicationTokens)
         let current = activeTokens(now)

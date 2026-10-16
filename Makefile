@@ -138,7 +138,7 @@ state: _server
 	@curl -sS $(AUTH) "$(SERVER)/state"; echo
 
 unlocks: _server
-	@curl -sS $(AUTH) "$(SERVER)/unlocks$(if $(SINCE),?since=$(SINCE),)" | python3 -c 'import sys,json; [print(u["at"], str(u["minutes"])+"分", ("個別"+str(u.get("appCount"))+"個" if u.get("kind")=="apps" else "全体"), u.get("lockReason") or "-", "使用"+str(u.get("usedMinutes"))+"/"+str(u.get("quotaMinutes")), u["reason"].replace(chr(10)," ")) for u in json.load(sys.stdin)["unlocks"]]'
+	@curl -sS $(AUTH) "$(SERVER)/unlocks$(if $(SINCE),?since=$(SINCE),)" | python3 -c 'import sys,json; [print(u["at"], str(u["minutes"])+"分", ("個別"+str(u.get("appCount"))+"個" if u.get("kind")=="apps" else "全体")+("・スーパー" if u.get("superLock") else ""), u.get("lockReason") or "-", "使用"+str(u.get("usedMinutes"))+"/"+str(u.get("quotaMinutes")), u["reason"].replace(chr(10)," ")) for u in json.load(sys.stdin)["unlocks"]]'
 
 push-alert: _server
 	SERVER="$(SERVER)" TOKEN_FILE="$(TOKEN_FILE)" tools/push.sh alert
