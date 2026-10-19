@@ -56,9 +56,11 @@ enum Shield {
         return (apps, sel.webDomainTokens, dropped)
     }
 
+    /// ウェブサイトの制限はしない（2026-10-19 本人判断: アプリ単位だけで止める）。
+    /// domains は ShieldKey の指紋用に受け取るだけで、webDomainCategories には反映しない。
     static func lockNow(apps: Set<ApplicationToken>, domains: Set<WebDomainToken>) {
         store.shield.applicationCategories = .all(except: apps)
-        store.shield.webDomainCategories = .all(except: domains)
+        store.shield.webDomainCategories = nil
         Store.shieldKey = ShieldKey.make(apps: apps, domains: domains)
     }
 
@@ -184,6 +186,13 @@ enum Shield {
         let superLock = Store.superLockUntil
         let until = Store.unlockUntil
         let shouldLock = (reason != .none || superLock != nil) && until == nil
+
+        // ウェブサイトの制限は使わない（2026-10-19 本人判断）。旧版からの引き継ぎ・入れ替え直後で
+        // webDomainCategories が掛かった状態のままでも、reconcile を1回通れば必ず外す（自己修復）。
+        // shouldLock／exceptChanged の分岐に関係なく、毎回ここで確かめる。
+        if store.shield.webDomainCategories != nil {
+            store.shield.webDomainCategories = nil
+        }
 
         let was = isShielded
         var exceptChanged = false
