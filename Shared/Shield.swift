@@ -212,10 +212,15 @@ enum Shield {
         if store.shield.webDomainCategories != nil {
             store.shield.webDomainCategories = nil
         }
-        // アプリの削除の禁止は厳格ロックのあいだだけ。shield の分岐に関係なく、毎回ここで合わせる
+        // アプリの削除の禁止と日付・時刻の自動設定の固定は厳格ロックのあいだだけ（時計を進めて期限を越えさせない）。
+        // shield の分岐に関係なく、毎回ここで合わせる
         if (store.application.denyAppRemoval ?? false) != (strict != nil) {
             store.application.denyAppRemoval = strict != nil ? true : nil
             Log.add(kind: "denyAppRemoval", route: route, detail: strict != nil ? "禁止" : "解いた")
+        }
+        if (store.dateAndTime.requireAutomaticDateAndTime ?? false) != (strict != nil) {
+            store.dateAndTime.requireAutomaticDateAndTime = strict != nil ? true : nil
+            Log.add(kind: "requireAutomaticDateAndTime", route: route, detail: strict != nil ? "固定" : "解いた")
         }
 
         let was = isShielded
@@ -413,14 +418,13 @@ enum Shield {
         guard AuthorizationCenter.shared.authorizationStatus == .approved else { return "スクリーンタイムの許可がまだです。" }
         guard StrictLock.minuteChoices.contains(minutes) else { return "時間を選んでください。" }
         guard !StrictLock.isActive(now) else { return "すでにロック中です。" }
+        guard SuperLock.loadSelection().applicationTokens.count <= AppUnlocks.limit else { return StrictLock.tooManyKeepApps }
         let until = now.addingTimeInterval(TimeInterval(minutes * 60))
-        do {
-            try DeviceActivityCenter().startMonitoring(.strictLockEnd, during: Wake.oneShot(from: until))
-            Store.strictLockEndFor = until
-        } catch {
-            Log.add(kind: "strictLock", route: "app", ok: false, error: Wake.describe(error), detail: "目覚ましを予約できないので始めない")
+        if let e = Wake.armStrictEnd(at: until) {
+            Log.add(kind: "strictLock", route: "app", ok: false, error: e, detail: "目覚ましを予約できないので始めない")
             return "ロックの終わりを予約できませんでした。もう一度お試しください。"
         }
+        Store.strictLockEndFor = until
         Store.strictLockUntil = until
         guard Store.strictLockUntil != nil else {
             reconcile(route: "strictLock")
@@ -541,7 +545,8 @@ final class StoreBox {
 extension Store {
     /// 手動ロック（サーバーの状態から）。ファイルが無い＝試作からの入れ替え直後は、今の shield から推す。
     /// トークンなしの端末（§9.5）では常になし: 外す手段がサーバーにしか無いので、立つと二度と外れない
-    /// （セルフロック中の shield から推すのも同じ）。読めないのが最初のロック解除前（データ保護中）なら今の shield を保つ
+    /// （セルフロック中の shield から推すのも同じ）。読めないのが最初のロック解除前（データ保護中）なら今の shield を保つ。
+    /// App Group が取れない誤設定では serverEnabled が true なので、どちらの分岐も通らず今の shield から推す
     static var manualLock: Bool {
         get {
             if let s = string("manualLock") { return s == "1" && serverEnabled }
@@ -627,11 +632,37 @@ enum Wake {
             return
         }
         box[keyPath: stored] = target
+        if name == .strictLockEnd {
+            if let e = armStrictEnd(at: max(target, Date().addingTimeInterval(5))) {
+                Log.add(kind: "arm", route: name.rawValue, ok: false, error: e,
+                        detail: "\(route) target=\(ISO.string(target))（期限後は自己修復に任せる）")
+            }
+            return
+        }
         do {
             try center.startMonitoring(name, during: oneShot(from: max(target, Date().addingTimeInterval(5))))
         } catch {
             Log.add(kind: "arm", route: name.rawValue, ok: false, error: describe(error),
                     detail: "\(route) target=\(ISO.string(target))（期限後は自己修復に任せる）")
+        }
+    }
+
+    /// 厳格ロックの終わりの目覚まし。間隔が短すぎると言われたら16分で取り直す（armPoll と同じ）。失敗なら理由
+    static func armStrictEnd(at start: Date) -> String? {
+        let center = DeviceActivityCenter()
+        do {
+            try center.startMonitoring(.strictLockEnd, during: oneShot(from: start))
+            return nil
+        } catch let first as DeviceActivityCenter.MonitoringError {
+            guard case .intervalTooShort = first else { return describe(first) }
+            do {
+                try center.startMonitoring(.strictLockEnd, during: oneShot(from: start, length: 16 * 60))
+                return nil
+            } catch {
+                return "\(describe(first)) / \(describe(error))"
+            }
+        } catch {
+            return describe(error)
         }
     }
 

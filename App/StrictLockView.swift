@@ -172,7 +172,7 @@ struct StrictWaitingHome: View {
             .padding(.horizontal, 16)
             .paperCard(radius: 14)
             if sel.applicationTokens.count > AppUnlocks.limit {
-                Text("\(AppUnlocks.limit)個を超えています。残せるのは\(AppUnlocks.limit)個までです。")
+                Text(StrictLock.tooManyKeepApps)
                     .font(.footnote).foregroundStyle(Theme.danger)
             }
             if !sel.categoryTokens.isEmpty {
@@ -263,6 +263,8 @@ struct StrictStartSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     row(title: "止まるもの", text: "残すアプリ以外のすべて。電話などは iOS の仕様で止まりません。")
                     Rectangle().fill(Theme.line).frame(height: 0.5)
+                    row(title: "変えられなくなるもの", text: "この iPhone のアプリは、どれも削除できなくなります。日付と時刻も自動設定のままになります。")
+                    Rectangle().fill(Theme.line).frame(height: 0.5)
                     row(title: "残すアプリ", text: keep.isEmpty ? "ありません。縁側も開けなくなります。" : "\(keep.count)個")
                     if !keep.isEmpty {
                         ForEach(Array(keep.prefix(6)), id: \.self) { t in
@@ -274,8 +276,8 @@ struct StrictStartSheet: View {
                 .paperCard(radius: 14)
                 .padding(.top, 20)
 
-                if let error {
-                    Text(error).font(.footnote).foregroundStyle(Theme.danger)
+                if let message = keep.count > AppUnlocks.limit ? StrictLock.tooManyKeepApps : error {
+                    Text(message).font(.footnote).foregroundStyle(Theme.danger)
                         .padding(.top, 10)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -286,6 +288,7 @@ struct StrictStartSheet: View {
                     Text("\(AppSettings.duration(m))ロックする").monospacedDigit()
                 }
                 .buttonStyle(PrimaryButtonStyle())
+                .disabled(keep.count > AppUnlocks.limit)
                 .padding(.top, 22)
                 Button("やめる") { dismiss() }
                     .buttonStyle(PlainWoodButtonStyle())

@@ -54,6 +54,11 @@ struct ServerState: Codable, Equatable {
 // MARK: - App Group のファイル置き場
 
 enum Store {
+    /// App Group のコンテナが取れているか（false なら dir は一時フォルダ）
+    static var hasAppGroup: Bool {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: Engawa.appGroup) != nil
+    }
+
     static var dir: URL {
         let fm = FileManager.default
         let base = fm.containerURL(forSecurityApplicationGroupIdentifier: Engawa.appGroup)
@@ -113,7 +118,9 @@ enum Store {
     /// 接続先はビルド既定値があるので、トークンの有無が実質の判定になる。
     /// トークンのファイルが在るのに読めないのは最初のロック解除前（データ保護中）なので「使う端末」として扱う
     /// （トークンなしと取り違えて手動ロックを落とさない。通信は Net が noToken で止める）
+    /// App Group が取れない誤設定（dir が一時フォルダに落ちている）では、トークンの有無で判定せず今までの動きにする
     static var serverEnabled: Bool {
+        guard hasAppGroup else { return true }
         guard data("token") != nil else { return FileManager.default.fileExists(atPath: url("token").path) }
         return token != nil && serverURL != nil
     }
