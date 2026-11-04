@@ -109,6 +109,15 @@ enum Store {
         set { setString("serverURL", newValue?.absoluteString) }
     }
 
+    /// サーバーを使う端末か（本番設計 §9.5 端末完結モード）。本体・全拡張の判定はここだけを見る。
+    /// 接続先はビルド既定値があるので、トークンの有無が実質の判定になる。
+    /// トークンのファイルが在るのに読めないのは最初のロック解除前（データ保護中）なので「使う端末」として扱う
+    /// （トークンなしと取り違えて手動ロックを落とさない。通信は Net が noToken で止める）
+    static var serverEnabled: Bool {
+        guard data("token") != nil else { return FileManager.default.fileExists(atPath: url("token").path) }
+        return token != nil && serverURL != nil
+    }
+
     static var appliedVersion: Int {
         get { Int(string("appliedVersion") ?? "") ?? 0 }
         set { setString("appliedVersion", String(newValue)) }
@@ -219,22 +228,26 @@ enum Log {
     //   - log.jsonl（画面用）の trim は本体だけが行う
     //   - 未送信分（outbox）はプロセス別のファイル。各プロセスは自分の分だけ消費する
     //     ただし ShieldConfig（ネットワーク不可）と ShieldAction は自分で送らないので、本体が代わりに送る
+    //   - トークンなし（§9.5）は outbox を書かない（送り先が無い）。log.jsonl は画面用に残すが、
+    //     本体が開かれないあいだ増え続けないよう、拡張は localLogLimit を超えたら足さない（次の起動で本体が trim する）
     static var logURL: URL { Store.url("log.jsonl") }
     static func outboxURL(_ proc: String = LogRecord.currentProc) -> URL { Store.url("outbox-\(proc).jsonl") }
     static func sendingURL(_ proc: String) -> URL { Store.url("outbox-\(proc).sending.jsonl") }
     static let queue = DispatchQueue(label: "engawa.log")
     static let outboxLimit = 5000
+    static let localLogLimit = 2_000_000
 
     static func add(_ r: LogRecord) {
         guard let line = try? JSONEncoder().encode(r) else { return }
         var d = line
         d.append(0x0A)
+        let online = Store.serverEnabled
         queue.sync {
-            appendLine(d, to: logURL)
+            if online || r.proc == "app" || fileSize(logURL) < localLogLimit { appendLine(d, to: logURL) }
             let ob = outboxURL(r.proc)
-            appendLine(d, to: ob)
+            if online { appendLine(d, to: ob) }
             if r.proc == "app" { trimIfNeeded(logURL, keep: Engawa.logLimit) }
-            trimIfNeeded(ob, keep: outboxLimit)   // 自分のファイルだけ
+            if online { trimIfNeeded(ob, keep: outboxLimit) }   // 自分のファイルだけ
         }
     }
 
@@ -258,10 +271,13 @@ enum Log {
         }
     }
 
+    private static func fileSize(_ u: URL) -> Int {
+        (try? FileManager.default.attributesOfItem(atPath: u.path)[.size] as? Int) ?? 0
+    }
+
     /// keep 行を超えたら古いものから捨てる。毎回数えると重いので、大きさで当たりを付けてから数える
     private static func trimIfNeeded(_ u: URL, keep: Int) {
-        let size = (try? FileManager.default.attributesOfItem(atPath: u.path)[.size] as? Int) ?? 0
-        guard size > keep * 200, let d = try? Data(contentsOf: u) else { return }
+        guard fileSize(u) > keep * 200, let d = try? Data(contentsOf: u) else { return }
         let lines = d.split(separator: 0x0A, omittingEmptySubsequences: true)
         guard lines.count > keep else { return }
         var out = Data()
@@ -284,6 +300,7 @@ enum Log {
     /// 本体からは ShieldConfig／ShieldAction の分も送る。アプリからの解除の記録（Unlocks）もここで送る
     @discardableResult
     static func flush(timeout: TimeInterval = 4) -> String {
+        guard Store.serverEnabled else { return "送らない（トークンなし）" }
         let me = LogRecord.currentProc
         // 解除の記録（理由つき）は本体だけが送る（拡張の短い持ち時間を使わない）。
         // 先に送るのは、送れなかったことの記録が下の flush に乗るように
@@ -354,7 +371,8 @@ enum Net {
 
     static func request(_ method: String, _ path: String, body: Data? = nil,
                         timeout: TimeInterval = 5) -> Result<(Int, Data), Error> {
-        guard let base = Store.serverURL else { return .failure(NetError.noServer) }
+        // トークンなしの端末は通信を始めない（§9.5）。本体・拡張の通信はすべてここを通る
+        guard Store.serverEnabled, let base = Store.serverURL else { return .failure(NetError.noServer) }
         guard let token = Store.token else { return .failure(NetError.noToken) }
         guard let url = URL(string: path, relativeTo: base) else { return .failure(NetError.noServer) }
         var req = URLRequest(url: url, timeoutInterval: timeout)

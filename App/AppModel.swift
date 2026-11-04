@@ -92,10 +92,18 @@ final class AppModel: ObservableObject {
         Log.add(kind: "foreground", route: "R1")   // 試験1-3: 開いてから反映までを測る起点
         Shield.reconcile(route: "R1")              // 通信の前に、期限切れの時間解除などを先に直す
         refreshHome()
-        syncing = true
+        let online = Store.serverEnabled   // トークンなしは同期しないので、進行中の印も出さない（§9.5）
+        syncing = online
         DispatchQueue.global().async {
             Wake.reconcile(Store.routes)   // 途切れた目覚ましを継ぎ直す
             Quota.armIfNeeded()
+            guard online else {
+                DispatchQueue.main.async {
+                    self.lastResult = "端末だけで動いています（トークンなし）"
+                    self.refresh()
+                }
+                return
+            }
             let r = Shield.sync(route: "R1")
             let sent = Log.flush()
             DispatchQueue.main.async {
@@ -127,6 +135,7 @@ final class AppModel: ObservableObject {
         let minutes = rec.minutes
         refreshHome()
         unlockMessage = "\(minutes)分 解除しました"
+        guard Store.serverEnabled else { refresh(); return }   // 送るものが無い（§9.5）
         DispatchQueue.global().async {
             let sent = Unlocks.flush()
             Log.flush()
@@ -152,6 +161,7 @@ final class AppModel: ObservableObject {
             refreshHome()
             let n = rec.appCount ?? 0
             unlockMessage = "\(n)個のアプリを\(minutes)分 解除しました"
+            guard Store.serverEnabled else { refresh(); return nil }   // 送るものが無い（§9.5）
             DispatchQueue.global().async {
                 let sent = Unlocks.flush()
                 Log.flush()

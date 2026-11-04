@@ -96,11 +96,18 @@ enum Shield {
     //   - スーパーロック: 端末だけ（ホームの「スーパーロック」・SuperLock.swift）。例外を残すアプリに絞る。期限で終わる。
     //                途中の解除は書き写し＋理由で10分の時間解除／個別解除（期限で既存の経路から戻る）
     //
+    //   トークンなしの端末（§9.5）: サーバーの状態を読まず、手動ロックは常になし。残りの層は端末だけで決まる。
+    //
     //   shield を書くのは reconcile だけ。
 
     /// サーバーの状態を反映する（R1・R2・R3・R4・R5 共通）。version > appliedVersion のときだけ
     @discardableResult
     static func apply(_ s: ServerState, route: String) -> ApplyResult {
+        guard Store.serverEnabled else {
+            // トークンなしの端末はサーバーの指示でロックを変えない（§9.5）
+            let st = reconcile(route: "sync-fallback")
+            return ApplyResult(applied: false, ok: true, locked: st.locked, error: nil)
+        }
         let now = Date()
         guard s.version > Store.appliedVersion else {
             // 同じ版でも、時間解除の期限切れで外れたままなら掛け直す（relock の取りこぼしの自己修復）
@@ -381,7 +388,7 @@ enum Shield {
     /// 取りに行って反映する（R1・R2・R4・R5）
     @discardableResult
     static func sync(route: String) -> ApplyResult? {
-        guard let s = Net.fetchState(route: route) else { return nil }
+        guard Store.serverEnabled, let s = Net.fetchState(route: route) else { return nil }
         return apply(s, route: route)
     }
 
@@ -475,10 +482,13 @@ final class StoreBox {
 }
 
 extension Store {
-    /// 手動ロック（サーバーの状態から）。ファイルが無い＝試作からの入れ替え直後は、今の shield から推す
+    /// 手動ロック（サーバーの状態から）。ファイルが無い＝試作からの入れ替え直後は、今の shield から推す。
+    /// トークンなしの端末（§9.5）では常になし: 外す手段がサーバーにしか無いので、立つと二度と外れない
+    /// （セルフロック中の shield から推すのも同じ）。読めないのが最初のロック解除前（データ保護中）なら今の shield を保つ
     static var manualLock: Bool {
         get {
-            if let s = string("manualLock") { return s == "1" }
+            if let s = string("manualLock") { return s == "1" && serverEnabled }
+            if !serverEnabled && !FileManager.default.fileExists(atPath: url("manualLock").path) { return false }
             return Shield.isShielded || unlockUntil != nil
         }
         set { setString("manualLock", newValue ? "1" : "0") }

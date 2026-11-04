@@ -129,6 +129,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         #if DEBUG
         if UIDemo.mode != nil { return true }   // 見た目の確認だけ。通知の許可・APNs 登録はしない
         #endif
+        // トークンなしの端末はプッシュを使わないので、通知の許可も APNs 登録も求めない（§9.5）
+        guard Store.serverEnabled else { return true }
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in

@@ -3,6 +3,7 @@ import Foundation
 // 縁側アプリからの時間解除の記録（理由つき）。サーバーの POST /unlocks へ送る。
 // 届かなかったら App Group の pending-unlocks/ に1件1ファイルで残し、次に本体が Log.flush するときに送り直す。
 // サーバーは id で重複を捨てるので、2つのプロセスが同じものを送っても害はない。
+// トークンなしの端末（§9.5）は送り先が無いので溜めない（理由は Log の記録にだけ残る）。
 
 struct UnlockRecord: Codable, Equatable {
     var id: String
@@ -54,6 +55,7 @@ enum Unlocks {
     }
 
     static func enqueue(_ r: UnlockRecord) {
+        guard Store.serverEnabled else { return }
         guard let d = try? JSONEncoder().encode(r) else { return }
         try? d.write(to: dir.appendingPathComponent("\(r.id).json"),
                      options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
@@ -67,6 +69,7 @@ enum Unlocks {
     /// それ以外は次に持ち越し、最初の失敗で打ち切る（つながらないときに1件ごとに待たない）
     @discardableResult
     static func flush(timeout: TimeInterval = 4) -> String {
+        guard Store.serverEnabled else { return "送らない（トークンなし）" }
         let fm = FileManager.default
         guard let names = try? fm.contentsOfDirectory(atPath: dir.path).filter({ $0.hasSuffix(".json") }).sorted(),
               !names.isEmpty else { return "送るものなし" }

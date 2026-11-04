@@ -834,7 +834,8 @@ struct AppUnlockView: View {
             Text("\(Unlocks.reasonLimit)字までにしてください").font(.footnote).foregroundStyle(Theme.danger)
                 .padding(.top, 6)
         }
-        Text("理由は記録に残ります。アプリ名は記録に送らず、数だけ送ります。")
+        Text(Store.serverEnabled ? "理由は記録に残ります。アプリ名は記録に送らず、数だけ送ります。"
+                                 : "理由はこの端末の記録に残ります。")
             .font(.caption).foregroundStyle(Theme.ink3)
             .padding(.top, 6)
             .fixedSize(horizontal: false, vertical: true)
