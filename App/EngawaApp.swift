@@ -31,8 +31,17 @@ struct RootView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            HomeView()
-                .navigationDestination(for: String.self) { _ in SettingsView() }
+            Group {
+                // 厳格ロック中はトークンの有無によらず同じ画面。トークンなしは厳格ロックだけの画面（§9.6）
+                if model.strictLockActive {
+                    StrictLockedHome()
+                } else if Store.serverEnabled {
+                    HomeView()
+                } else {
+                    StrictWaitingHome()
+                }
+            }
+            .navigationDestination(for: String.self) { _ in SettingsView() }
         }
         .onChange(of: scenePhase) { _, phase in
             if isDemo { return }
@@ -68,9 +77,18 @@ struct RootView: View {
 /// 見た目の確認用（シミュレータでスクリーンショットを撮るため）。`-engawaUIDemo <mode>` で起動したときだけ、
 /// 表示用の状態を画面の model にだけ入れ、同期・見回り・許可の要求・通知の登録をしない（シミュレータ用）。
 /// mode: usable／locked／unlocked／selflock／selflock-custom／sheet／apps／settings／
-///       superlock／superlock-sheet／super-unlock／super-unlock-reason／super-apps（スーパーロック・2026-10-16）。Debug ビルドだけ
+///       superlock／superlock-sheet／super-unlock／super-unlock-reason／super-apps（スーパーロック・2026-10-16）／
+///       strict-locked／strict-sheet／strict-confirm（厳格ロック・§9.6）。Debug ビルドだけ
 enum UIDemo {
     static let mode: String? = UserDefaults.standard.string(forKey: "engawaUIDemo")
+    /// 厳格ロックのシートを開いて出す: 0＝時間の選択、それ以外＝その長さの確認
+    static var strictSheetMinutes: Int? {
+        switch mode {
+        case "strict-sheet": return 0
+        case "strict-confirm": return 120
+        default: return nil
+        }
+    }
 
     static func apply(_ mode: String, to model: AppModel) {
         let now = Date()
@@ -96,6 +114,9 @@ enum UIDemo {
             model.status = LockStatus(locked: true, reason: .none, unlockUntil: nil, unlockSource: nil, updatedAt: ISO.now,
                                       superLockUntil: ISO.string(now.addingTimeInterval(2 * 3600)))
             model.idea = Idea(title: "本を10ページ読む", subtitle: "読みかけの本を開いてみませんか。10ページで止めてもいい。")
+        case "strict-locked":
+            model.status = LockStatus(locked: true, reason: .none, unlockUntil: nil, unlockSource: nil, updatedAt: ISO.now,
+                                      strictLockUntil: ISO.string(now.addingTimeInterval(2 * 3600)))
         case "selflock":
             model.usage = UsageState(periodStart: ISO.now, allMin: 48)
             model.status = LockStatus(locked: true, reason: .selfLock, unlockUntil: nil, unlockSource: nil, updatedAt: ISO.now,

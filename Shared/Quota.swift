@@ -235,6 +235,7 @@ enum Quota {
     /// 監視 daily を（登録し直して）登録する。失敗なら理由
     @discardableResult
     static func arm(reason: String) -> String? {
+        guard Store.serverEnabled else { return nil }   // トークンなしは枠を使わない（§9.6）
         let s = Store.settings
         let sel = Shield.loadSelection()
         let center = DeviceActivityCenter()

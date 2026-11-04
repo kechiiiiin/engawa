@@ -13,6 +13,8 @@ struct HomeView: View {
     @State private var showAppUnlock = false
     @State private var showSelfLock = false
     @State private var showSuperLock = false
+    @State private var showStrict = false
+    @State private var strictDemoMinutes: Int?
     /// 見た目の確認用（-engawaUIDemo super-unlock-reason）: 書き写しを済ませた段で出す
     @State private var superCopiedDemo = false
     /// 見た目の確認用（-engawaUIDemo selflock-custom）: 時間の指定を開いた状態で出す
@@ -74,6 +76,9 @@ struct HomeView: View {
                lead: "ふだんの許可アプリも止めて、設定の「スーパーロックで残すアプリ」だけを使えるようにします。途中で使うときは、文を1つ書き写して理由を書くと10分だけ解除できます。",
                verb: "スーパーロックする")
         }
+        .sheet(isPresented: $showStrict) {
+            StrictStartSheet(initialMinutes: strictDemoMinutes).environmentObject(model)
+        }
         .sheet(isPresented: $showSelfLock) {
             SelfLockSheet(title: selfLockTitle, message: selfLockMessage, start: { c in
                 model.startSelfLock(c)
@@ -92,6 +97,8 @@ struct HomeView: View {
             case "super-unlock": showUnlock = true
             case "super-unlock-reason": superCopiedDemo = true; showUnlock = true
             case "super-apps": showAppUnlock = true
+            case "strict-sheet": showStrict = true
+            case "strict-confirm": strictDemoMinutes = UIDemo.strictSheetMinutes; showStrict = true
             default: break
             }
         }
@@ -178,21 +185,7 @@ struct HomeView: View {
     }
 
     private func headline(_ title: String, dot: Color) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            Text(title)
-                .font(Theme.mincho(38, relativeTo: .largeTitle))
-                .tracking(2.3)
-                .foregroundStyle(Theme.ink)
-                .lineLimit(2)
-                .minimumScaleFactor(0.7)
-            Circle()
-                .fill(dot)
-                .frame(width: 9, height: 9)
-                .background(Circle().fill(dot.opacity(0.16)).frame(width: 17, height: 17))
-                .accessibilityHidden(true)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
+        StatusHeadline(title: title, dot: dot)
     }
 
     /// ロックの理由。枠だけのときは、いつ戻るかも添える
@@ -328,6 +321,7 @@ struct HomeView: View {
                 superLockButton
                     .buttonStyle(PlainWoodButtonStyle())
                     .disabled(model.authStatus != .approved)
+                strictLockButton
             } else {
                 Button(model.selfLockUntil == nil ? "いまからロック" : "セルフロックを延ばす") { showSelfLock = true }
                     .buttonStyle(PrimaryButtonStyle())
@@ -335,6 +329,7 @@ struct HomeView: View {
                 superLockButton
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(model.authStatus != .approved)
+                strictLockButton
             }
         }
         .padding(.horizontal, Theme.sideMargin)
@@ -354,6 +349,13 @@ struct HomeView: View {
     /// 「いまからロック」のすぐ下
     private var superLockButton: some View {
         Button(model.superLockActive ? "スーパーロックを延ばす" : "スーパーロック") { showSuperLock = true }
+    }
+
+    /// スーパーロックの下。残すアプリは設定の「スーパーロックで残すアプリ」を共用する
+    private var strictLockButton: some View {
+        Button("厳格ロック") { showStrict = true }
+            .buttonStyle(PlainWoodButtonStyle())
+            .disabled(model.authStatus != .approved)
     }
 
     // MARK: -

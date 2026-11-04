@@ -136,7 +136,7 @@ struct SettingsView: View {
         } header: {
             SettingsHeader(title: "スーパーロックで残すアプリ", count: apps + cats + domains)
         } footer: {
-            Text("スーパーロック中は、ここで選んだアプリだけが使えます。ふだんの許可アプリも止まるので、連絡に要るものだけを選びます。許可アプリとは別の一覧です。縁側を許可アプリに入れているときは、ここにも入れてください。")
+            Text("スーパーロック中は、ここで選んだアプリだけが使えます。ふだんの許可アプリも止まるので、連絡に要るものだけを選びます。許可アプリとは別の一覧です。縁側を許可アプリに入れているときは、ここにも入れてください。厳格ロックも同じ一覧を使います。")
                 .foregroundStyle(Theme.ink3)
         }
         .familyActivityPicker(isPresented: $showSuperPicker, selection: $model.superSelection)

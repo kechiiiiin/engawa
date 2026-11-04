@@ -15,8 +15,9 @@ extension DeviceActivityName {
     static let appRelock = Self("appRelock")     // 個別解除の終わり（いちばん早いもの）
     static let selfLockEnd = Self("selfLockEnd") // セルフロックの終わり
     static let superLockEnd = Self("superLockEnd") // スーパーロックの終わり（2026-10-16 足し算）
-    /// 使うアクティビティはこの9つだけ（上限20の報告に対して余裕を持つ。受け入れ条件20）。daily は Quota.swift
-    static let all: [DeviceActivityName] = [.pollA, .pollB, .relock, .usage, .test2, .daily, .appRelock, .selfLockEnd, .superLockEnd]
+    static let strictLockEnd = Self("strictLockEnd") // 厳格ロックの終わり（§9.6）
+    /// 使うアクティビティはこの10個だけ（上限20の報告に対して余裕を持つ。受け入れ条件20）。daily は Quota.swift
+    static let all: [DeviceActivityName] = [.pollA, .pollB, .relock, .usage, .test2, .daily, .appRelock, .selfLockEnd, .superLockEnd, .strictLockEnd]
 }
 
 enum Shield {
@@ -40,9 +41,9 @@ enum Shield {
 
     static var isShielded: Bool { store.shield.applicationCategories != nil }
 
-    /// ロック中も使える土台の一覧。スーパーロック中は「残すアプリ」、それ以外は許可アプリ
+    /// ロック中も使える土台の一覧。厳格ロック・スーパーロック中は「残すアプリ」、それ以外は許可アプリ
     static func baseSelection(_ now: Date = Date()) -> FamilyActivitySelection {
-        SuperLock.isActive(now) ? SuperLock.loadSelection() : loadSelection()
+        StrictLock.isActive(now) || SuperLock.isActive(now) ? SuperLock.loadSelection() : loadSelection()
     }
 
     /// 例外 = 土台（許可アプリ／スーパーロック中は残すアプリ）∪ 個別に解除中のアプリ（合わせて50個まで。超える分の個別解除は入れない）
@@ -50,7 +51,8 @@ enum Shield {
         let sel = baseSelection(now)
         var apps = sel.applicationTokens
         var dropped = 0
-        for u in AppUnlocks.active(now) where !apps.contains(u.token) {
+        // 厳格ロック中は個別解除を足さない
+        for u in StrictLock.isActive(now) ? [] : AppUnlocks.active(now) where !apps.contains(u.token) {
             if apps.count < AppUnlocks.limit { apps.insert(u.token) } else { dropped += 1 }
         }
         return (apps, sel.webDomainTokens, dropped)
@@ -95,6 +97,9 @@ enum Shield {
     //   - 個別解除:   縁側アプリ（アプリを選ぶ＋理由＋時間）。選んだアプリだけ例外に足し、期限で外す
     //   - スーパーロック: 端末だけ（ホームの「スーパーロック」・SuperLock.swift）。例外を残すアプリに絞る。期限で終わる。
     //                途中の解除は書き写し＋理由で10分の時間解除／個別解除（期限で既存の経路から戻る）
+    //
+    //   厳格ロック（§9.6・StrictLock.swift）は最上位: 厳格 || 上の式。時間解除では外れず、例外は残すアプリだけ。
+    //   期限が来たときだけ外れ、下の層の計算に戻る。アプリの削除もこのあいだだけ禁止する
     //
     //   トークンなしの端末（§9.5）: サーバーの状態を読まず、手動ロックは常になし。残りの層は端末だけで決まる。
     //
@@ -164,7 +169,14 @@ enum Shield {
     /// grace: この秒数のうちに来る期限も過ぎたものとして扱う（終わりの目覚ましが少し早く呼ばれたとき用）
     @discardableResult
     static func reconcile(route: String, force: Bool = false, grace: TimeInterval = 0) -> LockStatus {
+        // 最初のロック解除前は期限が読めないので、厳格ロック中なら何も変えない（解除後の reconcile が決める）
+        if StrictLock.unreadable {
+            return LockStatus(locked: isShielded, reason: .none, unlockUntil: nil, unlockSource: nil, updatedAt: ISO.now)
+        }
         let now = Date()
+        // 厳格ロックの余裕は、自分の終わりの目覚ましのときだけ（ほかの目覚ましのついでに早く外さない）
+        let strictState = StrictLock.resolve(now: now, grace: route == DeviceActivityName.strictLockEnd.rawValue ? grace : 0)
+        let strict = strictState.until
         var expired: Date?
         if let until = Store.unlockUntil, until <= now {
             expired = until
@@ -192,13 +204,18 @@ enum Shield {
         let reason = LockReason(manual: manual, quota: quota, selfLock: selfLock != nil)
         let superLock = Store.superLockUntil
         let until = Store.unlockUntil
-        let shouldLock = (reason != .none || superLock != nil) && until == nil
+        let shouldLock = strict != nil || ((reason != .none || superLock != nil) && until == nil)
 
         // ウェブサイトの制限は使わない（2026-10-19 本人判断）。旧版からの引き継ぎ・入れ替え直後で
         // webDomainCategories が掛かった状態のままでも、reconcile を1回通れば必ず外す（自己修復）。
         // shouldLock／exceptChanged の分岐に関係なく、毎回ここで確かめる。
         if store.shield.webDomainCategories != nil {
             store.shield.webDomainCategories = nil
+        }
+        // アプリの削除の禁止は厳格ロックのあいだだけ。shield の分岐に関係なく、毎回ここで合わせる
+        if (store.application.denyAppRemoval ?? false) != (strict != nil) {
+            store.application.denyAppRemoval = strict != nil ? true : nil
+            Log.add(kind: "denyAppRemoval", route: route, detail: strict != nil ? "禁止" : "解いた")
         }
 
         let was = isShielded
@@ -214,7 +231,7 @@ enum Shield {
             unlockNow()
         }
         let now2 = isShielded
-        if was != now2 || expired != nil || now2 != shouldLock || exceptChanged || selfEnded != nil || superEnded != nil || pruned > 0 {
+        if was != now2 || expired != nil || now2 != shouldLock || exceptChanged || selfEnded != nil || superEnded != nil || strictState.ended != nil || pruned > 0 {
             let ok = now2 == shouldLock
             Log.add(LogRecord(kind: expired != nil && now2 ? "relock" : "shield", route: route,
                               version: Store.appliedVersion, locked: shouldLock, appliedAt: ISO.now, ok: ok,
@@ -226,6 +243,8 @@ enum Shield {
                                   + (selfLock.map { " selfLockUntil=\(ISO.string($0))" } ?? "")
                                   + (superEnded.map { " superLockUntil=\(ISO.string($0))（終わり）" } ?? "")
                                   + (superLock.map { " superLockUntil=\(ISO.string($0))" } ?? "")
+                                  + (strictState.ended.map { " strictLockUntil=\(ISO.string($0))（終わり）" } ?? "")
+                                  + (strict.map { " strictLockUntil=\(ISO.string($0))" } ?? "")
                                   + (pruned > 0 ? " appUnlock期限切れ=\(pruned)" : "")
                                   + (exceptChanged ? " 例外を書き直し" : "")
                                   + (dropped > 0 ? " 上限で入れなかった個別解除=\(dropped)" : "")))
@@ -236,15 +255,14 @@ enum Shield {
         // 印の直前に読み直す（ここまでの間に別のプロセスが時間解除・個別解除を入れていたら、効いていない扱い）
         let t = Date()
         let effective = shouldLock && isShielded
-            && (Store.unlockUntil.map { $0 <= t } ?? true)
-            && AppUnlocks.active(t).isEmpty
+            && (strict != nil || ((Store.unlockUntil.map { $0 <= t } ?? true) && AppUnlocks.active(t).isEmpty))
         LockSpans.note(effective: effective, usage: Quota.usage(t), route: route)
         // 期限の目覚まし（変わったときだけ登録し直す）
         Wake.armExpiryWakes(route: route)
         let st = LockStatus(locked: shouldLock, reason: reason, unlockUntil: until.map(ISO.string),
                             unlockSource: until == nil ? nil : Store.unlockSource, updatedAt: ISO.now,
                             selfLockUntil: selfLock.map(ISO.string), appUnlockCount: active.count,
-                            superLockUntil: superLock.map(ISO.string))
+                            superLockUntil: superLock.map(ISO.string), strictLockUntil: strict.map(ISO.string))
         Store.setCodable("status.json", st)
         return st
     }
@@ -273,10 +291,12 @@ enum Shield {
     }
 
     /// 縁側アプリからの時間解除（理由は必須）。記録を残し、サーバーへ送る待ち行列に入れる。
-    /// スーパーロック中は10分固定（書き写しは画面で済ませてから呼ぶ）。記録に superLock の印を付ける
+    /// スーパーロック中は10分固定（書き写しは画面で済ませてから呼ぶ）。記録に superLock の印を付ける。
+    /// 厳格ロック中は断る（nil）
     @discardableResult
-    static func unlockFromApp(minutes requested: Int, reason: String) -> UnlockRecord {
+    static func unlockFromApp(minutes requested: Int, reason: String) -> UnlockRecord? {
         let now = Date()
+        guard !StrictLock.isActive(now) else { return nil }
         let isSuper = SuperLock.isActive(now)
         let minutes = isSuper ? SuperLock.unlockMinutes : requested
         let before = reconcile(route: "app")
@@ -309,6 +329,7 @@ enum Shield {
     /// スーパーロック中は10分固定（書き写しは画面で済ませてから呼ぶ）。記録に superLock の印を付ける
     static func unlockAppsFromApp(_ pick: FamilyActivitySelection, minutes requested: Int, reason: String) -> Result<UnlockRecord, AppUnlockError> {
         let now = Date()
+        guard !StrictLock.isActive(now) else { return .failure(AppUnlockError(message: "いまは解除できません。")) }
         let isSuper = SuperLock.isActive(now)
         let minutes = isSuper ? SuperLock.unlockMinutes : requested
         let c = AppUnlocks.check(pick, now: now)
@@ -383,6 +404,36 @@ enum Shield {
                               + (old.map { " 前=\(ISO.string($0))" } ?? "")
                               + (hadUnlock.map { " 時間解除を打ち消し=\(ISO.string($0))" } ?? "")))
         return st
+    }
+
+    /// 厳格ロックを始める。断るときは理由を返し、何も変えない。
+    /// 終わりの目覚ましを予約できないときは始めない（閉じ込めないため）。進行中の時間解除・個別解除は打ち切る
+    static func startStrictLock(minutes: Int) -> String? {
+        let now = Date()
+        guard AuthorizationCenter.shared.authorizationStatus == .approved else { return "スクリーンタイムの許可がまだです。" }
+        guard StrictLock.minuteChoices.contains(minutes) else { return "時間を選んでください。" }
+        guard !StrictLock.isActive(now) else { return "すでにロック中です。" }
+        let until = now.addingTimeInterval(TimeInterval(minutes * 60))
+        do {
+            try DeviceActivityCenter().startMonitoring(.strictLockEnd, during: Wake.oneShot(from: until))
+            Store.strictLockEndFor = until
+        } catch {
+            Log.add(kind: "strictLock", route: "app", ok: false, error: Wake.describe(error), detail: "目覚ましを予約できないので始めない")
+            return "ロックの終わりを予約できませんでした。もう一度お試しください。"
+        }
+        Store.strictLockUntil = until
+        guard Store.strictLockUntil != nil else {
+            reconcile(route: "strictLock")
+            return "ロックを保存できませんでした。もう一度お試しください。"
+        }
+        if Store.unlockUntil != nil { clearUnlock() }
+        clearAppUnlocks(route: "strictLock")
+        // 例外が残すアプリに変わるので、ロック中でも掛け直す
+        let st = reconcile(route: "strictLock", force: true)
+        Log.add(LogRecord(kind: "strictLock", route: "app", version: Store.appliedVersion, locked: st.locked,
+                          appliedAt: ISO.now, ok: st.locked && isShielded,
+                          detail: "minutes=\(minutes) until=\(ISO.string(until)) keepApps=\(SuperLock.loadSelection().applicationTokens.count)"))
+        return nil
     }
 
     /// 取りに行って反映する（R1・R2・R4・R5）
@@ -463,6 +514,8 @@ struct LockStatus: Codable, Equatable {
     var appUnlockCount: Int? = nil
     /// スーパーロックの終わり（2026-10-16 足し算。古い status.json には無い）
     var superLockUntil: String? = nil
+    /// 厳格ロックの終わり（§9.6。古い status.json には無い）
+    var strictLockUntil: String? = nil
 }
 
 /// Wake.arm で Store の static を KeyPath で触るための入れ物
@@ -478,6 +531,10 @@ final class StoreBox {
     var superLockEndFor: Date? {
         get { Store.superLockEndFor }
         set { Store.superLockEndFor = newValue }
+    }
+    var strictLockEndFor: Date? {
+        get { Store.strictLockEndFor }
+        set { Store.strictLockEndFor = newValue }
     }
 }
 
@@ -548,6 +605,7 @@ enum Wake {
         arm(.appRelock, target: AppUnlocks.earliestUntil, stored: \.appRelockFor, route: route, force: force)
         arm(.selfLockEnd, target: Store.selfLockUntil, stored: \.selfLockEndFor, route: route, force: force)
         arm(.superLockEnd, target: Store.superLockUntil, stored: \.superLockEndFor, route: route, force: force)
+        arm(.strictLockEnd, target: Store.strictLockUntil, stored: \.strictLockEndFor, route: route, force: force)
     }
 
     private static func arm(_ name: DeviceActivityName, target: Date?,

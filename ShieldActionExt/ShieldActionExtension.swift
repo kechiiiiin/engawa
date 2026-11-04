@@ -2,6 +2,7 @@ import Foundation
 import ManagedSettings
 
 // ボタンは「閉じる」だけ。押された記録を残して .close を返す（ネットワークには出ない）。
+// 厳格ロックの期限が過ぎていれば、ここで外す。
 
 class ShieldActionExtension: ShieldActionDelegate {
 
@@ -31,5 +32,7 @@ class ShieldActionExtension: ShieldActionDelegate {
         default: name = String(describing: action)
         }
         Log.add(kind: "shieldAction", detail: "\(what) \(name)")
+        // 厳格ロックの期限後に残った shield は、ここでも外す（縁側自身が止まっていて開けないときの最後の網）
+        if Store.strictLockUntil != nil { Shield.reconcile(route: "shieldAction") }
     }
 }

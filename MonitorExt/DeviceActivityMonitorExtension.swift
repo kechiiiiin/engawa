@@ -13,7 +13,7 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         wake("intervalDidStart", activity)
         if activity == .relock {
             relock()
-        } else if activity == .appRelock || activity == .selfLockEnd || activity == .superLockEnd {
+        } else if activity == .appRelock || activity == .selfLockEnd || activity == .superLockEnd || activity == .strictLockEnd {
             // 個別解除・セルフロック・スーパーロックの終わり（スーパーロックが終われば例外が許可アプリに戻る）。少し早く呼ばれても外せるよう2分の余裕を見て決め直し、
             // まだ先の期限が残っていればそこへ登録し直す（force: 少し早すぎて対象が変わらなかったとき用）
             let st = Shield.reconcile(route: activity.rawValue, grace: 120)
@@ -106,6 +106,7 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         case .appRelock: return "appRelock"
         case .selfLockEnd: return "selfLockEnd"
         case .superLockEnd: return "superLockEnd"
+        case .strictLockEnd: return "strictLockEnd"
         default: return activity.rawValue
         }
     }

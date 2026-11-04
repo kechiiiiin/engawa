@@ -43,6 +43,9 @@ final class AppModel: ObservableObject {
     var unlockUntil: Date? { status.unlockUntil.flatMap(ISO.parse) }
     var selfLockUntil: Date? { status.selfLockUntil.flatMap(ISO.parse) }
     var superLockUntil: Date? { status.superLockUntil.flatMap(ISO.parse) }
+    var strictLockUntil: Date? { status.strictLockUntil.flatMap(ISO.parse) }
+    /// 厳格ロック中か（解除の入口を出さない。ホームごと StrictLockedHome になる）
+    var strictLockActive: Bool { strictLockUntil.map { $0 > Date() } ?? false }
     /// スーパーロック中か（解除は書き写し＋理由・10分固定になる）
     var superLockActive: Bool { superLockUntil.map { $0 > Date() } ?? false }
 
@@ -120,6 +123,7 @@ final class AppModel: ObservableObject {
         let expired = (Store.unlockUntil.map { $0 <= now } ?? false)
             || (Store.selfLockUntil.map { $0 <= now } ?? false)
             || (Store.superLockUntil.map { $0 <= now } ?? false)
+            || (Store.strictLockUntil.map { $0 <= now } ?? false)
             || AppUnlocks.all.contains { $0.untilDate <= now }
         if expired { Shield.reconcile(route: "sync-fallback") }
         refreshHome()
@@ -131,7 +135,7 @@ final class AppModel: ObservableObject {
     func unlock(minutes requested: Int, reason: String) {
         let r = Unlocks.normalizeReason(reason)
         guard !r.isEmpty, Unlocks.minuteChoices.contains(requested) || requested == SuperLock.unlockMinutes else { return }
-        let rec = Shield.unlockFromApp(minutes: requested, reason: r)
+        guard let rec = Shield.unlockFromApp(minutes: requested, reason: r) else { return }
         let minutes = rec.minutes
         refreshHome()
         unlockMessage = "\(minutes)分 解除しました"
@@ -205,6 +209,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: 厳格ロック（§9.6）
+
+    /// 断るときは理由を返す（画面に出す）。済んだら nil
+    func startStrictLock(minutes: Int) -> String? {
+        if let e = Shield.startStrictLock(minutes: minutes) { return e }
+        refresh()
+        return nil
+    }
+
     // MARK: スーパーロック（残すアプリだけを使えるロック）
 
     func startSuperLock(_ choice: SelfLock.Choice) {
@@ -237,6 +250,7 @@ final class AppModel: ObservableObject {
     }
 
     func saveSuperSelection(_ s: FamilyActivitySelection) {
+        guard !StrictLock.isActive() else { superSelection = SuperLock.loadSelection(); return }   // 弱められない（§9.6）
         SuperLock.saveSelection(s)
         Log.add(kind: "superSelection", detail: "apps=\(s.applicationTokens.count) domains=\(s.webDomainTokens.count) cats=\(s.categoryTokens.count)")
         // スーパーロック中なら残すアプリを入れ直して掛け直す
@@ -247,6 +261,7 @@ final class AppModel: ObservableObject {
     // MARK: 設定
 
     func saveSettings(_ s: AppSettings) {
+        guard !StrictLock.isActive() else { settings = Store.settings; return }   // 弱められない（§9.6）
         let old = Store.settings
         guard s != old else { return }
         Store.settings = s
@@ -259,6 +274,7 @@ final class AppModel: ObservableObject {
     }
 
     func saveSelection(_ s: FamilyActivitySelection) {
+        guard !StrictLock.isActive() else { selection = Shield.loadSelection(); return }   // 弱められない（§9.6）
         Shield.saveSelection(s)
         Log.add(kind: "selection", detail: "apps=\(s.applicationTokens.count) domains=\(s.webDomainTokens.count) cats=\(s.categoryTokens.count)")
         // ロック中なら許可アプリを入れ直して掛け直す。差し引きで数えるときはイベントも作り直す
