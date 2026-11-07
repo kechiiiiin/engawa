@@ -180,7 +180,7 @@ struct StrictWaitingHome: View {
                     .font(.footnote).foregroundStyle(Theme.caution)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("ロック中も使えるアプリです。電話などは iOS の仕様で止まりません。縁側も入れておくと、ロック中に残り時間を見られます。")
+            Text("ロック中も使えるアプリです。縁側は選ばなくても止まらないので、ロック中も開いて残り時間を見られます。電話などは iOS の仕様で止まりません。")
                 .font(.caption).foregroundStyle(Theme.ink3)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -261,11 +261,11 @@ struct StrictStartSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 VStack(alignment: .leading, spacing: 0) {
-                    row(title: "止まるもの", text: "残すアプリ以外のすべて。電話などは iOS の仕様で止まりません。")
+                    row(title: "止まるもの", text: "残すアプリと縁側以外のすべて。電話などは iOS の仕様で止まりません。")
                     Rectangle().fill(Theme.line).frame(height: 0.5)
                     row(title: "変えられなくなるもの", text: "この iPhone のアプリは、どれも削除できなくなります。日付と時刻も自動設定のままになります。")
                     Rectangle().fill(Theme.line).frame(height: 0.5)
-                    row(title: "残すアプリ", text: keep.isEmpty ? "ありません。縁側も開けなくなります。" : "\(keep.count)個")
+                    row(title: "残すアプリ", text: keep.isEmpty ? "ありません。縁側は開けるので、残り時間はいつでも見られます。" : "\(keep.count)個")
                     if !keep.isEmpty {
                         ForEach(Array(keep.prefix(6)), id: \.self) { t in
                             Label(t).foregroundStyle(Theme.ink).padding(.bottom, 8)

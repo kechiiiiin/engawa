@@ -60,6 +60,10 @@ enum Shield {
 
     /// ウェブサイトの制限はしない（2026-10-19 本人判断: アプリ単位だけで止める）。
     /// domains は ShieldKey の指紋用に受け取るだけで、webDomainCategories には反映しない。
+    /// 縁側自身は `apps` に入れなくても止まらない: FamilyControls で認可されたアプリは ManagedSettings の
+    /// block・shield の対象外（Apple Frameworks Engineer, 2025-05, developer.apple.com/forums/thread/783310）。
+    /// 自分の ApplicationToken はコードで作れない（Token は Codable の init だけ・SDK の swiftinterface）ので、
+    /// 例外に足す手段も無い。厳格ロックの「残すアプリ」の文言はこれを前提にしている（実機で確かめる）
     static func lockNow(apps: Set<ApplicationToken>, domains: Set<WebDomainToken>) {
         store.shield.applicationCategories = .all(except: apps)
         store.shield.webDomainCategories = nil
