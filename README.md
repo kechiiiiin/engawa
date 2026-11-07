@@ -104,6 +104,27 @@ R5 の段数: `make usage-n N=120`（アプリ内の Picker でも可）。登�
 ### PushExt から Family Controls を外して試す
 `make build PUSHEXT_FC_SUFFIX=-noFC && make install`
 
+## 配る（TestFlight）
+
+fam-echo/ios と同じ形。署名は App Store Connect API キー＋ `-allowProvisioningUpdates` の自動署名で、配布用プロファイル（5ターゲット分）は xcodebuild が作る・取る。
+
+```sh
+# 初回だけ: API キーの設定（fam-echo と同じキー。値は画面に出さない・Release.local.env は gitignore 済み）
+grep -E '^ASC_(KEY_ID|ISSUER_ID)=' ~/work/fam-echo/ios/Release.local.env > Release.local.env
+
+make archive             # Release で build/archive/Engawa.xcarchive（開発用署名）
+make export-testflight   # 配布用に署名し直して build/export/Engawa.ipa（送らない）
+make verify-ipa          # 5ターゲットの署名者・family-controls・aps-environment を見る
+make upload              # App Store Connect へ上げる（＝ export-testflight DESTINATION=upload）
+make release             # archive → upload
+```
+
+- ビルド番号（CFBundleVersion）は `make archive` のたびに日時で振る（`年月日.1時分`）。同じ番号は App Store Connect が受け付けない。手で決めるなら `make archive BUILD_NUMBER=2`。`project.yml` の `CURRENT_PROJECT_VERSION: 1` は開発用のまま
+- 版（CFBundleShortVersionString）は `project.yml` の `MARKETING_VERSION`
+- entitlements ファイルの `aps-environment` は `development` のまま（開発用の `make resign` 用）。書き出しで配布プロファイルに合わせて `production` になる見込み（`make verify-ipa` で確かめる）
+- 未対応: アプリはデバイストークンを `env: "sandbox"` で登録している（`App/EngawaApp.swift`）。TestFlight ビルドのトークンは production なので、サーバーからのプッシュ（R2／R3）を TestFlight 版で使うなら直す
+- 【啓輔・ブラウザ】は無し（アプリ登録・Family Controls (Distribution)・API キーは 2026-11-04 までに済み）。外部テスターに配るときだけ TestFlight の審査が要る
+
 ## 啓輔さんの手作業（まとめ）
 
 | いつ | 誰 | 何を | 回数 |

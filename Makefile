@@ -8,6 +8,13 @@
 #   make push-alert / push-silent        Mac から APNs（sandbox）へ送る（tools/push.sh）
 #   make events        記録を取って経路別の遅れを表にする（tools/latency.py）
 #
+# 配る（README「配る（TestFlight）」・fam-echo/ios と同形）
+#   make archive            Release で .xcarchive を作る（ビルド番号は日時で自動。BUILD_NUMBER= で上書き可）
+#   make export-testflight  .xcarchive から App Store Connect 向けの .ipa を build/export/ に書き出す（送らない）
+#   make upload             API キーで App Store Connect へ上げる（Release.local.env と .p8 が要る）
+#   make release            archive → upload
+#   make verify-ipa         書き出した .ipa の5ターゲットの署名と entitlement を見る
+#
 # ⚠️ 注意
 #   - `*.xcodeproj` は生成物でコミットしない。各ターゲットの先頭で `xcodegen generate` を走らせる
 #   - `devicectl` でアプリへ引数を渡すときは前に `--` が要る
@@ -37,7 +44,8 @@ AUTH = -H "Authorization: Bearer $$(cat $(TOKEN_FILE))"
 M ?=
 
 .PHONY: help resign generate build install launch check devices clean \
-        lock unlock state unlocks push-alert push-silent events import-token routes test2 usage-n
+        lock unlock state unlocks push-alert push-silent events import-token routes test2 usage-n \
+        archive export-testflight upload release verify-ipa require-asc-key require-team
 
 help:
 	@echo "resign        generate → build → install"
@@ -58,6 +66,11 @@ help:
 	@echo "import-token  トークンとサーバー URL を実機へ流し込む（次の起動で App Group へ）"
 	@echo "routes R=poll,usageWake  経路を起動引数で切り替える（書いたものだけオン。アプリが前面に出る）"
 	@echo "test2         試験2 の監視を起動引数で登録させる（アプリが前面に出る）"
+	@echo "archive       Release で .xcarchive（ビルド番号は日時で自動・BUILD_NUMBER= で上書き）"
+	@echo "export-testflight  App Store Connect 向けの .ipa を build/export/ に書き出す（送らない）"
+	@echo "upload        App Store Connect へ上げる（TestFlight）"
+	@echo "release       archive → upload"
+	@echo "verify-ipa    .ipa の5ターゲットの署名と entitlement を見る"
 
 resign: generate build install
 	@echo "✅ 実機に入れた"
@@ -148,3 +161,86 @@ push-silent: _server
 
 events: _server
 	SERVER="$(SERVER)" TOKEN_FILE="$(TOKEN_FILE)" python3 tools/latency.py $(if $(SINCE),--since "$(SINCE)",)
+
+# --- 配る（TestFlight）。fam-echo/ios の Makefile と同形 ---
+#
+# 署名は API キー＋ -allowProvisioningUpdates の自動署名。archive は開発用（Apple Development）で署名され、
+# export-testflight が配布用（Apple Distribution・App Store プロファイル）で署名し直す。
+# このとき aps-environment は配布プロファイルに合わせて production になる（entitlements ファイルの development は
+# 開発用の make resign のためにそのまま残す）。確かめるのは make verify-ipa。
+# xcodebuild の全文ログ（build/archive.log・build/export.log）には API キーのパスと Key ID が出る。build/ は gitignore 済み
+
+RELEASE_ENV   = Release.local.env
+ARCHIVE       = build/archive/Engawa.xcarchive
+EXPORT_DIR    = build/export
+EXPORT_PLIST  = build/ExportOptions.generated.plist
+RELEASE_DD    = build/release
+VERIFY_DIR    = build/verify-ipa
+DESTINATION  ?= export
+# ビルド番号（CFBundleVersion）: 「年月日.1時分」（例 20261107.12257）。App Store Connect は同じ番号を受け付けないので、
+# 上げるたびに増えればよい。project.yml の CURRENT_PROJECT_VERSION（1）は開発用のまま書き換えない。
+# コマンドラインの CURRENT_PROJECT_VERSION= は5ターゲットすべてに効く（本体と拡張の番号は一致が必須）
+BUILD_NUMBER ?= $(shell date +%Y%m%d.1%H%M)
+
+# API キー（Release.local.env から読む。環境変数でも渡せる）。値は表示しない
+env_value = $(strip $(shell sed -n 's/^$(1)=//p' $(RELEASE_ENV) 2>/dev/null | tail -1))
+ASC_KEY_ID    ?= $(call env_value,ASC_KEY_ID)
+ASC_ISSUER_ID ?= $(call env_value,ASC_ISSUER_ID)
+ASC_KEY_PATH  ?= $(call env_value,ASC_KEY_PATH)
+ifeq ($(strip $(ASC_KEY_PATH)),)
+ASC_KEY_PATH := $(HOME)/.appstoreconnect/private_keys/AuthKey_$(ASC_KEY_ID).p8
+endif
+ASC_KEY_PATH := $(patsubst ~/%,$(HOME)/%,$(ASC_KEY_PATH))
+ifneq ($(and $(ASC_KEY_ID),$(ASC_ISSUER_ID),$(wildcard $(ASC_KEY_PATH))),)
+AUTH_FLAGS = -authenticationKeyPath "$(ASC_KEY_PATH)" -authenticationKeyID $(ASC_KEY_ID) -authenticationKeyIssuerID $(ASC_ISSUER_ID)
+endif
+
+require-team:
+	@test -n "$(TEAM)" || { echo "Team ID がありません（$(CONF)/team-id を置くか TEAM=… を渡す）"; exit 1; }
+
+require-asc-key:
+	@test -n "$(ASC_KEY_ID)" -a -n "$(ASC_ISSUER_ID)" || { echo "ASC_KEY_ID / ASC_ISSUER_ID がありません。Release.example.env を見て Release.local.env を作ってください"; exit 1; }
+	@test -f "$(ASC_KEY_PATH)" || { echo "API キーがありません: ~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8"; exit 1; }
+
+archive: require-team require-asc-key generate
+	@mkdir -p build/archive
+	rm -rf build/archive/Engawa.xcarchive
+	@echo "ビルド番号 $(BUILD_NUMBER) で archive します"
+	@set -o pipefail; xcodebuild -project $(PROJECT) -scheme $(SCHEME) -configuration Release \
+	  -destination 'generic/platform=iOS' -derivedDataPath $(RELEASE_DD) -archivePath $(ARCHIVE) \
+	  -allowProvisioningUpdates $(AUTH_FLAGS) $(TEAM_ARG) CURRENT_PROJECT_VERSION=$(BUILD_NUMBER) archive 2>&1 \
+	  | tee build/archive.log | grep -E '(error|warning):|ARCHIVE (SUCCEEDED|FAILED)' ; \
+	  grep -q 'ARCHIVE SUCCEEDED' build/archive.log || { echo "archive に失敗しました（全文は build/archive.log）"; exit 1; }
+	@echo "$(BUILD_NUMBER)" > build/archive/BUILD_NUMBER
+	@printf "できました: %s（版 %s・ビルド %s）\n" "$(ARCHIVE)" \
+	  "$$(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:CFBundleShortVersionString' $(ARCHIVE)/Info.plist)" \
+	  "$$(/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:CFBundleVersion' $(ARCHIVE)/Info.plist)"
+
+export-testflight: require-team require-asc-key
+	@test -d $(ARCHIVE) || { echo "$(ARCHIVE) がありません。先に make archive"; exit 1; }
+	rm -rf build/export
+	@mkdir -p $(EXPORT_DIR)
+	cp ExportOptions.plist $(EXPORT_PLIST)
+	@plutil -replace teamID -string "$(TEAM)" $(EXPORT_PLIST)
+	plutil -replace destination -string $(DESTINATION) $(EXPORT_PLIST)
+	@xcodebuild -exportArchive -archivePath $(ARCHIVE) -exportPath $(EXPORT_DIR) \
+	  -exportOptionsPlist $(EXPORT_PLIST) -allowProvisioningUpdates $(AUTH_FLAGS) 2>&1 \
+	  | tee build/export.log | grep -E '(error|warning):|EXPORT (SUCCEEDED|FAILED)|Upload|Uploaded|uploaded' ; \
+	  grep -q 'EXPORT SUCCEEDED' build/export.log || { echo "export に失敗しました（全文は build/export.log）"; exit 1; }
+	@if [ "$(DESTINATION)" = export ]; then ls -lh $(EXPORT_DIR)/*.ipa; else echo "App Store Connect へ上げました（処理が済むと TestFlight に出る）"; fi
+
+upload: require-asc-key
+	$(MAKE) export-testflight DESTINATION=upload
+
+release: archive upload
+
+## .ipa を build/verify-ipa/ に展開して、本体と拡張4つの署名者・entitlement を出す（Family Controls・aps-environment の確認用）
+verify-ipa:
+	@ls $(EXPORT_DIR)/*.ipa >/dev/null 2>&1 || { echo "$(EXPORT_DIR)/*.ipa がありません。先に make export-testflight"; exit 1; }
+	rm -rf build/verify-ipa
+	@mkdir -p $(VERIFY_DIR) && unzip -q "$$(ls $(EXPORT_DIR)/*.ipa | head -1)" -d $(VERIFY_DIR)
+	@for b in $(VERIFY_DIR)/Payload/Engawa.app $(VERIFY_DIR)/Payload/Engawa.app/PlugIns/*.appex; do \
+	  echo "== $$(basename $$b)（ビルド $$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' $$b/Info.plist)）"; \
+	  codesign -dvv $$b 2>&1 | grep -E '^Authority=Apple (Distribution|Development)' | sed 's/ (.*//; s/^/  /'; \
+	  codesign -d --entitlements :- $$b 2>/dev/null | plutil -convert json -o - - | python3 -c 'import sys,json; e=json.load(sys.stdin); print("  family-controls:", e.get("com.apple.developer.family-controls"), "/ aps-environment:", e.get("aps-environment", "-"), "/ get-task-allow:", e.get("get-task-allow"), "/ beta-reports-active:", e.get("beta-reports-active"))'; \
+	done

@@ -14,3 +14,5 @@ server/.dev.vars
 *.pem
 token
 __pycache__/
+# TestFlight の API キー（値入り）。見本は Release.example.env
+Release.local.env
