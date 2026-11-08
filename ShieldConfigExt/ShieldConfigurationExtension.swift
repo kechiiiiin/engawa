@@ -3,7 +3,7 @@ import ManagedSettings
 import ManagedSettingsUI
 import UIKit
 
-// ロック画面の文言。スーパーロック中は終了時刻と「閉じる」だけ（§9.6）。スーパーロックで使うアプリの登録の確かめ中は、
+// ロック画面の文言。スーパーロック中・通常ロック中は終了時刻と「閉じる」だけ（§9.6・§9.9）。スーパーロックで使うアプリの登録の確かめ中は、
 // 許可一覧のアプリにだけ登録のボタンを出す（§9.8 B）。
 // ネットワークは使わない（この拡張はサンドボックスで出られない・公式）。返すのが遅いと既定表示に落ちるので軽く。
 // この拡張から App Group への書き込みは届かない（2026-11-08 試しで確認）。Log.add は届けば残る程度
@@ -11,12 +11,12 @@ import UIKit
 class ShieldConfigurationExtension: ShieldConfigurationDataSource {
 
     override func configuration(shielding application: Application) -> ShieldConfiguration {
-        if Store.strictLockUntil == nil, KeepApps.isVerifying { return verify(application) }
+        if Store.strictLockUntil == nil, KeepApps.treatAsCandidate(application.token) { return verify(application) }
         return make("app")
     }
 
     override func configuration(shielding application: Application, in category: ActivityCategory) -> ShieldConfiguration {
-        if Store.strictLockUntil == nil, KeepApps.isVerifying { return verify(application) }
+        if Store.strictLockUntil == nil, KeepApps.treatAsCandidate(application.token) { return verify(application) }
         return make("app/category")
     }
 
@@ -30,6 +30,7 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
 
     private func make(_ what: String) -> ShieldConfiguration {
         if let until = Store.strictLockUntil { return strict(what, until: until) }
+        if let until = Store.normalLockUntil { return normal(what, until: until) }
         // スーパーロックでも確かめでもないのに止まっている（旧版の止めが残っているなど）。縁側を開けば reconcile が外す
         Log.add(kind: "shieldShown", detail: "\(what) other")
         return styled(icon: "flame",
@@ -63,6 +64,15 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         Log.add(kind: "shieldShown", detail: "\(what) strict ended=\(ended)")
         return styled(icon: "flame",
                       title: ended ? "スーパーロックの時間が終わりました" : "\(StrictLock.clock(until)) までスーパーロック中",
+                      subtitle: ended ? "「閉じる」を押すと、使えるようになります。" : "時間が来ると、自動で使えるようになります。")
+    }
+
+    /// 通常ロック（§9.9）: 終了時刻と「閉じる」だけ
+    private func normal(_ what: String, until: Date) -> ShieldConfiguration {
+        let ended = until <= Date()
+        Log.add(kind: "shieldShown", detail: "\(what) normal ended=\(ended)")
+        return styled(icon: "flame",
+                      title: ended ? "ロックの時間が終わりました" : "\(StrictLock.clock(until)) までロック中",
                       subtitle: ended ? "「閉じる」を押すと、使えるようになります。" : "時間が来ると、自動で使えるようになります。")
     }
 

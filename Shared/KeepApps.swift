@@ -63,6 +63,16 @@ enum KeepApps {
     /// 確かめ中か（候補を一時的に止めている）
     static var isVerifying: Bool { Store.data(verifyingFile) != nil }
 
+    /// 通常ロックとの見分け（§9.9）。通常ロック中は、止まっているアプリが確かめの候補か通常ロックの対象かを見分ける。
+    /// 通常ロックでないときは今までどおり（確かめ中なら候補として扱う＝2026-11-08 実機で通った動きを変えない）。
+    /// 候補の一覧が読めないとき（nil）も今までどおり候補として扱う
+    static func treatAsCandidate(_ token: ApplicationToken?) -> Bool {
+        guard isVerifying else { return false }
+        guard Store.normalLockUntil.map({ $0 > Date() }) ?? false else { return true }
+        guard let token, let pending = store.shield.applications else { return true }
+        return pending.contains(token)
+    }
+
     /// 一時的に止めている候補の数
     static var pendingCount: Int { store.shield.applications?.count ?? 0 }
 

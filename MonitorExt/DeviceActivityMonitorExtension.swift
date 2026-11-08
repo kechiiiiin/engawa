@@ -2,31 +2,49 @@ import DeviceActivity
 import Foundation
 import ManagedSettings
 
-// 使う監視はスーパーロックの終わり（.strictLockEnd）だけ（本番設計 §9.8 C）。
-// どのコールバックでも記録を残し、期限を確かめて決め直す（期限後に止めを残さない）。
+// 使う監視は、ロックの終わり（.strictLockEnd・.normalLockEnd）と、スケジュールの毎日の予定（sched.<id>.n＝ロック期間、
+// sched.<id>.s＝スーパーロックの時間帯・Shared/Schedule.swift）（本番設計 §9.9）。
+// どのコールバックでも記録を残し、期限とスケジュールを確かめて決め直す（期限後に止めを残さない・アプリを開かなくても切り替わる）。
 // ネットワークは使わない。メモリ上限は約6MB の報告があるので、外部ライブラリは入れない。
 // 旧版が登録した監視（枠の daily など）が呼ばれても、ここでは決め直すだけ（本体の起動時に止める）
 
 class DeviceActivityMonitorExtension: DeviceActivityMonitor {
 
+    /// 目覚ましが少し早く呼ばれても切り替えられる余裕（秒）
+    static let slack: TimeInterval = 120
+
     override func intervalDidStart(for activity: DeviceActivityName) {
         super.intervalDidStart(for: activity)
         wake("intervalDidStart", activity)
-        if activity == .strictLockEnd {
+        switch activity {
+        case .strictLockEnd, .normalLockEnd:
             // 少し早く呼ばれても外せるよう2分の余裕を見て決め直し、まだ先の期限が残っていればそこへ登録し直す
-            // （force: 少し早すぎて対象が変わらなかったとき用）
-            let st = Shield.reconcile(route: activity.rawValue, grace: 120)
-            Wake.armExpiryWakes(route: activity.rawValue, force: true)
-            Log.add(LogRecord(kind: activity.rawValue, route: activity.rawValue, locked: st.locked,
-                              appliedAt: ISO.now, ok: Shield.isShielded == st.locked,
-                              detail: st.strictLockUntil.map { "strictLockUntil=\($0)" }))
+            // （forceFor: 少し早すぎて対象が変わらなかったとき用）
+            var hint = WakeHint()
+            if activity == .strictLockEnd { hint.strictGrace = Self.slack } else { hint.normalGrace = Self.slack }
+            let st = Shield.reconcile(route: activity.rawValue, hint: hint)
+            Wake.armExpiryWakes(route: activity.rawValue, forceFor: activity)
+            done(activity, st)
+        case _ where Self.isSchedule(activity):
+            // スケジュールの始まり（ロック期間・スーパーの時間帯）。少し早く呼ばれても掛けられるよう余裕を見る
+            let st = Shield.reconcile(route: activity.rawValue, hint: WakeHint(lead: Self.slack))
+            done(activity, st)
+        default:
+            finish()
         }
-        finish()
     }
 
     override func intervalDidEnd(for activity: DeviceActivityName) {
         super.intervalDidEnd(for: activity)
         wake("intervalDidEnd", activity)
+        if Self.isSchedule(activity) {
+            // スケジュールの終わり。期限は終わりの目覚ましでも外れるが、ここでも決め直す（二重の網）
+            var hint = WakeHint()
+            if activity.rawValue.hasSuffix(".s") { hint.strictGrace = Self.slack } else { hint.normalGrace = Self.slack }
+            let st = Shield.reconcile(route: activity.rawValue, hint: hint)
+            done(activity, st)
+            return
+        }
         finish()
     }
 
@@ -54,7 +72,15 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         Log.add(kind: "wake", route: activity.rawValue, detail: callback)
     }
 
-    /// どのコールバックでも、期限切れのスーパーロックが掛かったままなら外す（自己修復）
+    static func isSchedule(_ a: DeviceActivityName) -> Bool { a.rawValue.hasPrefix(Schedules.prefix) }
+
+    private func done(_ activity: DeviceActivityName, _ st: LockStatus) {
+        Log.add(LogRecord(kind: activity.rawValue, route: activity.rawValue, locked: st.locked,
+                          appliedAt: ISO.now, ok: true,
+                          detail: "mode=\(st.mode ?? "-") strict=\(st.strictLockUntil ?? "-") normal=\(st.normalLockUntil ?? "-")"))
+    }
+
+    /// どのコールバックでも、期限切れのロックが掛かったままなら外し、スケジュールの回の中なら掛ける（自己修復）
     private func finish() {
         Shield.reconcile(route: "sync-fallback")
     }

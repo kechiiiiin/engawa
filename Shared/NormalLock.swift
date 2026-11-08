@@ -1,0 +1,92 @@
+import Foundation
+import FamilyControls
+import ManagedSettings
+
+// 通常ロック（本番設計 §9.9・2026-11-08 本人と決定）。
+//
+//   利用者が iOS のアプリ一覧の画面（FamilyActivityPicker）で選んだアプリ（とカテゴリ）だけを止める、軽いロック。
+//   - 期限まで外れない。始め方は手動（30分〜8時間）とスケジュール（Shared/Schedule.swift）の2つ
+//   - 止めるアプリはロック中も選び直せ、選び直しは即反映（外したアプリはその場で使える・本人承知の逃げ道）。
+//     選び直せるので、スーパーロックのようなアプリの削除の禁止・日付と時刻の固定はしない（効き目が無い割に重い）
+//   - ウェブサイトは止めない（§8.5）。ピッカーでサイトを選んでも使わない
+//   - 期限の扱いはスーパーロック（StrictLock）と同じ作り: 期限をファイルに置き、終わりの目覚まし（.normalLockEnd）・
+//     本体の起動と見回り・止めたアプリの画面の「閉じる」のどれでも、期限後の reconcile で外れる
+//   - スーパーロックと重なったらスーパーが勝つ（Shield.reconcile の1か所で決める）
+
+enum NormalLock {
+    static let fileKey = "normalLockUntil"
+    static let selectionFile = "normal-selection.json"
+    /// 止めるアプリの上限（ManagedSettings の shield.applications は50個まで）
+    static let appLimit = 50
+    static var tooManyApps: String { "通常ロックで止めるアプリは\(appLimit)個までです。選び直してください。" }
+
+    static func isActive(_ now: Date = Date()) -> Bool {
+        Store.normalLockUntil.map { $0 > now } ?? false
+    }
+
+    /// 止めるアプリ（とカテゴリ）。ピッカーの選択をそのまま置く
+    static var selection: FamilyActivitySelection {
+        get { Store.codable(selectionFile, as: FamilyActivitySelection.self) ?? FamilyActivitySelection() }
+        set { Store.setCodable(selectionFile, newValue) }
+    }
+
+    /// 選択に止めるものがあるか（サイトだけの選択は止めるものなし）
+    static func hasTargets(_ s: FamilyActivitySelection) -> Bool {
+        !s.applicationTokens.isEmpty || !s.categoryTokens.isEmpty
+    }
+
+    /// 期限を確かめる（reconcile から呼ぶ）。期限切れと壊れた値は消し、先すぎる値は切り詰める
+    static func resolve(now: Date, grace: TimeInterval) -> (until: Date?, ended: Date?) {
+        LockTimer.resolve(key: fileKey, kind: "normalLock", now: now, grace: grace)
+    }
+}
+
+/// 期限ファイルの共通の扱い（スーパーロック・通常ロック）
+enum LockTimer {
+    /// 先すぎる期限の切り詰め先（秒）。スケジュールの1回の最長（24時間未満）を収める。
+    /// どんな値でも、いまから24時間で必ず終わる
+    static let maxAhead: TimeInterval = 24 * 3600
+
+    static func resolve(key: String, kind: String, now: Date, grace: TimeInterval) -> (until: Date?, ended: Date?) {
+        guard Store.data(key) != nil else { return (nil, nil) }
+        guard let until = Store.string(key).flatMap(ISO.parse) else {
+            Store.setString(key, nil)
+            Log.add(kind: kind, ok: false, error: "期限が読めないので外した")
+            return (nil, nil)
+        }
+        if until <= now.addingTimeInterval(grace) {
+            Store.setString(key, nil)
+            return (nil, until)
+        }
+        let limit = now.addingTimeInterval(maxAhead)
+        if until > limit.addingTimeInterval(60) {
+            Store.setString(key, ISO.string(limit))
+            Log.add(kind: kind, ok: false, error: "期限が先すぎるので切り詰めた",
+                    detail: "\(ISO.string(until)) → \(ISO.string(limit))")
+            return (limit, nil)
+        }
+        return (until, nil)
+    }
+
+    /// 期限・スケジュールのファイルが在るのに読めない＝最初のロック解除前（データ保護中）。
+    /// このあいだは shield も削除禁止も変えない
+    static var unreadable: Bool {
+        [StrictLock.fileKey, NormalLock.fileKey, Schedules.file].contains { key in
+            Store.data(key) == nil && FileManager.default.fileExists(atPath: Store.url(key).path)
+        }
+    }
+}
+
+extension Store {
+    /// 通常ロックの終わり（無ければ通常ロックなし）
+    static var normalLockUntil: Date? {
+        get { string(NormalLock.fileKey).flatMap(ISO.parse) }
+        set { setString(NormalLock.fileKey, newValue.map(ISO.string)) }
+    }
+
+    /// .normalLockEnd を登録したときの対象
+    static var normalLockEndFor: Date? {
+        get { string("normalLockEndFor").flatMap(ISO.parse) }
+        set { setString("normalLockEndFor", newValue.map(ISO.string)) }
+    }
+}

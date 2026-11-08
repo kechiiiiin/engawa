@@ -13,10 +13,19 @@ final class AppModel: ObservableObject {
     /// 登録の確かめ中か（候補を一時的に止めている）・止めている候補の数
     @Published var keepVerifying = KeepApps.isVerifying
     @Published var keepPending = KeepApps.pendingCount
+    /// 通常ロックで止めるアプリ（§9.9・ロック中も選び直せる）
+    @Published var normalSelection: FamilyActivitySelection = NormalLock.selection
+    /// スケジュール（5個まで・§9.9）
+    @Published var schedules: [LockSchedule] = Schedules.all
 
     var strictLockUntil: Date? { status.strictLockUntil.flatMap(ISO.parse) }
     /// スーパーロック中か（解除の入口を出さない。ホームごと StrictLockedHome になる）
     var strictLockActive: Bool { strictLockUntil.map { $0 > Date() } ?? false }
+    var normalLockUntil: Date? { status.normalLockUntil.flatMap(ISO.parse) }
+    /// 通常ロック中か（スーパーロックと重なっていても true）
+    var normalLockActive: Bool { normalLockUntil.map { $0 > Date() } ?? false }
+    /// どちらかのロック中（スケジュールの編集が「次の回から」になる案内を出す）
+    var anyLockActive: Bool { strictLockActive || normalLockActive }
 
     /// 表示を App Group から読み直す（軽い）
     func refresh() {
@@ -25,6 +34,8 @@ final class AppModel: ObservableObject {
         keepApps = KeepApps.registered
         keepVerifying = KeepApps.isVerifying
         keepPending = KeepApps.pendingCount
+        normalSelection = NormalLock.selection
+        schedules = Schedules.all
     }
 
     func requestAuth() {
@@ -49,7 +60,10 @@ final class AppModel: ObservableObject {
 
     /// 前面にいるあいだの見回り（期限が来たら外す・残り時間の表示）
     func tick() {
-        if Store.strictLockUntil.map({ $0 <= Date() }) ?? false { Shield.reconcile(route: "sync-fallback") }
+        // 期限が来たか、スケジュールの回が始まったら決め直す（拡張が起きなかったときの網）
+        let now = Date()
+        let expired = [Store.strictLockUntil, Store.normalLockUntil].contains { $0.map { $0 <= now } ?? false }
+        if expired || !Schedules.all.isEmpty { Shield.reconcile(route: "sync-fallback") }
         refresh()
     }
 
@@ -60,6 +74,35 @@ final class AppModel: ObservableObject {
         if let e = Shield.startStrictLock(minutes: minutes) { return e }
         refresh()
         return nil
+    }
+
+    // MARK: 通常ロック（§9.9）
+
+    func startNormalLock(minutes: Int) -> String? {
+        if let e = Shield.startNormalLock(minutes: minutes) { return e }
+        refresh()
+        return nil
+    }
+
+    /// 止めるアプリを選び直す（ロック中も即反映）。断るときは理由
+    func setNormalSelection(_ sel: FamilyActivitySelection) -> String? {
+        let e = Shield.setNormalSelection(sel)
+        refresh()
+        return e
+    }
+
+    // MARK: スケジュール（§9.9）
+
+    /// 保存する。いま掛かっているロックは変えず、次の回から効く。断るときは理由
+    func saveSchedule(_ s: LockSchedule) -> String? {
+        let e = Schedules.save(s)
+        refresh()
+        return e
+    }
+
+    func deleteSchedule(id: String) {
+        Schedules.delete(id: id)
+        refresh()
     }
 
     // MARK: スーパーロックで使うアプリ（§9.8 B）
