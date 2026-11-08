@@ -11,10 +11,12 @@ import DeviceActivity
 //     保存する（伸ばすだけで縮めない）。あとは手動のロックと同じ期限の仕組み（目覚まし・reconcile）で外れる。
 //     スケジュールを消しても縮めても、保存した期限はそのまま＝いま掛かっている回は元の期限まで続く（受け入れ条件7）
 //   - 編集・追加した時刻（effectiveFrom）より前に始まった回には効かない＝「次の回から効く」。保存した瞬間に
-//     いきなりロックが掛かることもない
+//     いきなりロックが掛かることもない。始まった回は中身を写して確定する（Run）ので、その回のまだ来ていない
+//     スーパーの時間帯も、編集・削除で消せない
 //   - アプリを開かなくても切り替わるよう、DeviceActivity の予定を「毎日くり返す」で登録して、始まり・終わりに
 //     MonitorExt を起こす（曜日は登録せず、起きたときに apply が曜日を見る）。1個につき ロック期間 と
-//     スーパーの時間帯 の最大2件。5個で10件、終わりの目覚まし2件（.strictLockEnd・.normalLockEnd）と合わせて12件。
+//     スーパーの時間帯 の最大2件。5個で10件、終わりの目覚まし2件（.strictLockEnd・.normalLockEnd）、確定済みの回の
+//     スーパーの始まり（.runSuperStart）、最初のロック解除前の拾い直し（.retryAfterUnlock）と合わせて14件。
 //     iOS の上限は「1つのアプリと拡張で同時に20件」（Apple のドキュメント
 //     DeviceActivityCenter.MonitoringError.excessiveActivities）なので、5個の上限の中で超えない
 //   - 予定の間隔は15分以上が要る（短いと intervalTooShort）。画面は15分刻みで、短い時間帯を作らせない
@@ -137,14 +139,19 @@ enum Schedules {
     static let systemActivityLimit = 20
     static let prefix = "sched."
 
-    static var all: [LockSchedule] {
-        Store.codable(file, as: [LockSchedule].self) ?? []
+    static var all: [LockSchedule] { load() ?? [] }
+
+    /// 読めないとき（壊れている・最初のロック解除前）は nil。ファイルが無ければ空
+    static func load() -> [LockSchedule]? {
+        guard FileManager.default.fileExists(atPath: Store.url(file).path) else { return [] }
+        return Store.codable(file, as: [LockSchedule].self)
     }
 
-    /// 保存して予定を登録し直す（本体から）。断るときは理由
+    /// 保存して予定を登録し直す（本体から）。断るときは理由。iOS への登録に失敗したら保存を戻す
     static func save(_ s: LockSchedule) -> String? {
         if let r = s.invalidReason { return r }
-        var list = all
+        let before = load() ?? []
+        var list = before
         var item = s
         item.effectiveFrom = ISO.now   // 次の回から効く
         if let i = list.firstIndex(where: { $0.id == s.id }) {
@@ -155,36 +162,82 @@ enum Schedules {
         }
         Store.setCodable(file, list)
         guard all == list else { return "スケジュールを保存できませんでした。もう一度お試しください。" }
+        if let e = syncMonitoring(route: "schedule") {
+            // iOS に登録できなかった: 保存を戻し、予定も元に合わせる（一覧と iOS の予定をずらさない）
+            Store.setCodable(file, before)
+            _ = syncMonitoring(route: "schedule-rollback")
+            Log.add(kind: "schedule", ok: false, error: e, detail: "保存を戻した \(item.id)")
+            return e + "（保存していません）"
+        }
         Log.add(kind: "schedule", detail: "保存 \(item.id) \(item.weekdaysText) \(item.periodText) super=\(item.superText ?? "-")")
-        return syncMonitoring(route: "schedule")
+        return nil
     }
 
-    /// 消す（本体から）。いま掛かっているロックの期限はそのまま（受け入れ条件7）
+    /// 消す（本体から）。いま掛かっている回（確定済みの回のスーパーの時間帯を含む）はそのまま（受け入れ条件7）
     static func delete(id: String) {
         Store.setCodable(file, all.filter { $0.id != id })
-        Log.add(kind: "schedule", detail: "削除 \(id)")
-        _ = syncMonitoring(route: "schedule")
+        let ok = !all.contains { $0.id == id }
+        let e = syncMonitoring(route: "schedule")
+        Log.add(kind: "schedule", ok: ok && e == nil, error: ok ? e : "削除を保存できなかった", detail: "削除 \(id)")
+    }
+
+    // MARK: 確定済みの回（始まった回の中身を写したもの）
+    //
+    //   回が始まったとき（apply がロック期間の中だと判断したとき）に、その回の終わりとスーパーの時間帯を写しておく。
+    //   以後その回は、スケジュールを編集・削除しても写した中身で進む（まだ来ていないスーパーの時間帯も消せない・§9.9 の7）。
+    //   回の判定は「回の始まりが effectiveFrom より後か」の1つだけ（進行中の回に足した・変えたスケジュールは、
+    //   ロック期間もスーパーの時間帯も次の回から）。ロック期間の終わりを過ぎたら消す
+
+    struct Run: Codable, Equatable {
+        var scheduleID: String
+        var normalStart: Date
+        var normalEnd: Date
+        var superStart: Date?
+        var superEnd: Date?
+    }
+
+    static let runsFile = "schedule-runs.json"
+
+    static var runs: [Run] {
+        get { Store.codable(runsFile, as: [Run].self) ?? [] }
+        set { Store.setCodable(runsFile, newValue.isEmpty ? nil : newValue) }
+    }
+
+    /// 確定済みの回のうち、これから来るスーパーの始まりでいちばん早いもの（一発の目覚ましの対象）
+    static func nextRunSuperStart(after now: Date) -> Date? {
+        runs.compactMap(\.superStart).filter { $0 > now }.min()
     }
 
     /// いまがどれかの回の中なら、その回の終わりまで通常ロック／スーパーロックの期限を伸ばす（縮めない）。
     /// reconcile の頭で呼ぶ。lead: 始まりの目覚ましが少し早く来たとき用。grace: 終わりの目覚ましが少し早く来たとき、
     /// 終わりかけの回を当て直さないため
     static func apply(now: Date, lead: TimeInterval, strictGrace: TimeInterval, normalGrace: TimeInterval, route: String) {
-        let list = all
-        guard !list.isEmpty else { return }
+        let before = runs
+        var list = before.filter { $0.normalEnd > now }
+        // 始まった回を確定する（中身はこの時点のスケジュールから写す）
+        for s in all {
+            guard let from = ISO.parse(s.effectiveFrom) else { continue }
+            for o in s.occurrences(around: now) where o.normal.start >= from {
+                guard now >= o.normal.start.addingTimeInterval(-lead), now < o.normal.end else { continue }
+                if list.contains(where: { $0.scheduleID == s.id && abs($0.normalStart.timeIntervalSince(o.normal.start)) < 1 }) { continue }
+                list.append(Run(scheduleID: s.id, normalStart: o.normal.start, normalEnd: o.normal.end,
+                                superStart: o.superLock?.start, superEnd: o.superLock?.end))
+                Log.add(kind: "scheduleRun", route: route,
+                        detail: "確定 \(s.id) \(ISO.string(o.normal.start))〜\(ISO.string(o.normal.end))"
+                            + (o.superLock.map { " super=\(ISO.string($0.start))〜\(ISO.string($0.end))" } ?? ""))
+            }
+        }
+        if list != before { runs = list }
+        // 確定済みの回だけで決める
         var normalTo: Date?
         var strictTo: Date?
-        for s in list {
-            guard let from = ISO.parse(s.effectiveFrom) else { continue }
-            for o in s.occurrences(around: now) {
-                if o.normal.start >= from, now >= o.normal.start.addingTimeInterval(-lead),
-                   now < o.normal.end.addingTimeInterval(-normalGrace) {
-                    normalTo = max(normalTo ?? o.normal.end, o.normal.end)
-                }
-                if let sup = o.superLock, sup.start >= from, now >= sup.start.addingTimeInterval(-lead),
-                   now < sup.end.addingTimeInterval(-strictGrace) {
-                    strictTo = max(strictTo ?? sup.end, sup.end)
-                }
+        for r in list {
+            if now >= r.normalStart.addingTimeInterval(-lead), now < r.normalEnd.addingTimeInterval(-normalGrace) {
+                normalTo = max(normalTo ?? r.normalEnd, r.normalEnd)
+            }
+            if let ss = r.superStart, let se = r.superEnd,
+               now >= ss.addingTimeInterval(-lead), now < se.addingTimeInterval(-strictGrace) {
+                strictTo = max(strictTo ?? se, se)
             }
         }
         if let n = normalTo, (Store.normalLockUntil ?? .distantPast) < n.addingTimeInterval(-1) {
@@ -199,12 +252,17 @@ enum Schedules {
         }
     }
 
-    /// 予定を、保存してあるスケジュールに合わせる（本体から: 保存・削除・起動）。失敗したら理由
+    /// 予定を、保存してあるスケジュールに合わせる（本体から: 保存・削除・起動）。失敗したら理由。
+    /// スケジュールのファイルが読めない（壊れている・データ保護中）ときは予定に触らない（黙って全部止めない）
     @discardableResult
     static func syncMonitoring(route: String) -> String? {
+        guard let list = load() else {
+            Log.add(kind: "scheduleMonitor", route: route, ok: false, error: "スケジュールが読めないので予定はそのまま")
+            return nil
+        }
         let center = DeviceActivityCenter()
         var desired: [DeviceActivityName: DeviceActivitySchedule] = [:]
-        for s in all where s.invalidReason == nil {
+        for s in list where s.invalidReason == nil {
             for (n, sc) in s.activities { desired[n] = sc }
         }
         let current = center.activities.filter { $0.rawValue.hasPrefix(prefix) }

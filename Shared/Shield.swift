@@ -14,6 +14,11 @@ import CryptoKit
 extension DeviceActivityName {
     static let strictLockEnd = Self("strictLockEnd") // スーパーロック（厳格ロック）の終わり（§9.6）
     static let normalLockEnd = Self("normalLockEnd") // 通常ロックの終わり（§9.9）
+    /// 確定済みの回のスーパーの始まり（一発・§9.9。スケジュールを編集・削除しても、始まった回のスーパーは来る）。
+    /// "sched." で始めない（Schedules.syncMonitoring が古い予定として外さないように）
+    static let runSuperStart = Self("runSuperStart")
+    /// 最初のロック解除前に起こされて何もできなかったときの拾い直し（一発・15分後）
+    static let retryAfterUnlock = Self("retryAfterUnlock")
     /// 旧版が登録していた監視（枠の daily・目覚まし・解除の終わりなど）。起動時に止める（§9.8 C）
     static let legacy: [DeviceActivityName] = ["pollA", "pollB", "relock", "usage", "test2", "daily",
                                                 "appRelock", "selfLockEnd", "superLockEnd"].map { Self($0) }
@@ -92,6 +97,9 @@ enum Shield {
     static func reconcile(route: String, force: Bool = false, hint: WakeHint = WakeHint()) -> LockStatus {
         // 最初のロック解除前は期限が読めないので、何も変えない（解除後の reconcile が決める）
         if LockTimer.unreadable {
+            // 拡張の中（予定の始まりなど）で何もできなかったら、少しあとにもう一度起こしてもらう。
+            // 本体は端末のロック解除時（applicationProtectedDataDidBecomeAvailable）に決め直す
+            if LogRecord.currentProc != "app" { Wake.armRetryAfterUnlock() }
             return LockStatus(locked: isShielded, updatedAt: ISO.now)
         }
         let now = Date()
@@ -320,9 +328,23 @@ enum Wake {
             setPrev: { Store.strictLockEndFor = $0 }, route: route, force: forceFor == .strictLockEnd)
         arm(.normalLockEnd, target: Store.normalLockUntil, prev: Store.normalLockEndFor,
             setPrev: { Store.normalLockEndFor = $0 }, route: route, force: forceFor == .normalLockEnd)
+        arm(.runSuperStart, target: Schedules.nextRunSuperStart(after: Date()), prev: Store.runSuperStartFor,
+            setPrev: { Store.runSuperStartFor = $0 }, route: route, force: forceFor == .runSuperStart)
     }
 
-    private static func arm(_ name: DeviceActivityName, target: Date?, prev: Date?, setPrev: (Date?) -> Void,
+    /// 最初のロック解除前（データ保護中）の拾い直し。15分後に一度起こす。先の予約が残っていれば登録し直さない
+    /// （起こされてもまだ読めなければ、そのときにまた15分後を予約する）。ファイルには書けないので記録は残らない
+    static func armRetryAfterUnlock() {
+        let center = DeviceActivityCenter()
+        let now = Date()
+        if let sc = center.schedule(for: .retryAfterUnlock),
+           let start = Calendar.current.date(from: sc.intervalStart), start > now {
+            return
+        }
+        try? center.startMonitoring(.retryAfterUnlock, during: oneShot(from: now.addingTimeInterval(interval)))
+    }
+
+    static func arm(_ name: DeviceActivityName, target: Date?, prev: Date?, setPrev: (Date?) -> Void,
                             route: String, force: Bool) {
         let same = prev.map { p in target.map { abs($0.timeIntervalSince(p)) < 1 } ?? false } ?? (target == nil)
         if same && !force {

@@ -71,7 +71,7 @@ enum LockTimer {
     /// 期限・スケジュールのファイルが在るのに読めない＝最初のロック解除前（データ保護中）。
     /// このあいだは shield も削除禁止も変えない
     static var unreadable: Bool {
-        [StrictLock.fileKey, NormalLock.fileKey, Schedules.file].contains { key in
+        [StrictLock.fileKey, NormalLock.fileKey, Schedules.file, Schedules.runsFile].contains { key in
             Store.data(key) == nil && FileManager.default.fileExists(atPath: Store.url(key).path)
         }
     }
@@ -82,6 +82,12 @@ extension Store {
     static var normalLockUntil: Date? {
         get { string(NormalLock.fileKey).flatMap(ISO.parse) }
         set { setString(NormalLock.fileKey, newValue.map(ISO.string)) }
+    }
+
+    /// .runSuperStart を登録したときの対象
+    static var runSuperStartFor: Date? {
+        get { string("runSuperStartFor").flatMap(ISO.parse) }
+        set { setString("runSuperStartFor", newValue.map(ISO.string)) }
     }
 
     /// .normalLockEnd を登録したときの対象
