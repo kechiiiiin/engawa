@@ -21,9 +21,16 @@ import ManagedSettings
 
 enum KeepApps {
     /// 開発側の許可一覧（bundle ID と画面に出す名前）。iOS の標準アプリ（電話・メッセージなど）は
-    /// 全部止めても止まらないので載せない（DTS「by design」）。中身は LINE だけから始める（他は未決）
+    /// 全部止めても止まらないので載せない（DTS「by design」）。中身は個人の連絡アプリ（2026-11-08 決定）
     static let allowList: [(bundleID: String, name: String)] = [
         ("jp.naver.line", "LINE"),
+        ("com.plusmessage", "＋メッセージ"),
+        ("net.whatsapp.WhatsApp", "WhatsApp"),
+        ("com.facebook.Messenger", "Messenger"),
+        ("com.iwilab.KakaoTalk", "カカオトーク"),
+        ("com.tencent.xin", "WeChat"),
+        ("ph.telegra.Telegraph", "Telegram"),
+        ("org.whispersystems.signal", "Signal"),
     ]
 
     /// 残せるアプリの上限（ManagedSettings の例外は50個まで）
