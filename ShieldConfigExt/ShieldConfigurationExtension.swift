@@ -3,9 +3,10 @@ import ManagedSettings
 import ManagedSettingsUI
 import UIKit
 
-// ロック画面の文言。「代わりにやりたいこと」を一覧からランダムに1つ（Shared/Ideas.swift）。
-// 一覧は App Group の ideas.json（設定画面で編集）、無ければ既定の10件、空なら固定文。
+// ロック画面の文言。スーパーロック中は終了時刻と「閉じる」だけ（§9.6）。スーパーロックで使うアプリの登録の確かめ中は、
+// 許可一覧のアプリにだけ登録のボタンを出す（§9.8 B）。
 // ネットワークは使わない（この拡張はサンドボックスで出られない・公式）。返すのが遅いと既定表示に落ちるので軽く。
+// この拡張から App Group への書き込みは届かない（2026-11-08 試しで確認）。Log.add は届けば残る程度
 
 class ShieldConfigurationExtension: ShieldConfigurationDataSource {
 
@@ -29,18 +30,11 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
 
     private func make(_ what: String) -> ShieldConfiguration {
         if let until = Store.strictLockUntil { return strict(what, until: until) }
-        let (idea, i, source) = Ideas.pick()
-        Log.add(kind: "shieldShown", detail: "\(what) source=\(source) idea=\(i.map(String.init) ?? "-") \(idea.title)")
-        return ShieldConfiguration(
-            backgroundBlurStyle: .systemThickMaterial,
-            backgroundColor: nil,
-            icon: UIImage(systemName: "flame"),
-            title: ShieldConfiguration.Label(text: idea.title, color: .label),
-            subtitle: ShieldConfiguration.Label(text: idea.subtitle, color: .secondaryLabel),
-            primaryButtonLabel: ShieldConfiguration.Label(text: "閉じる", color: .white),
-            primaryButtonBackgroundColor: .systemOrange,
-            secondaryButtonLabel: nil
-        )
+        // スーパーロックでも確かめでもないのに止まっている（旧版の止めが残っているなど）。縁側を開けば reconcile が外す
+        Log.add(kind: "shieldShown", detail: "\(what) other")
+        return styled(icon: "flame",
+                      title: "縁側のロック",
+                      subtitle: "縁側を開くと、このロックは外れます。")
     }
 
     // 色: 見出しが暗い背景に暗い文字で読めなかった（2026-11-08 試しの実機）。背景色の指定（生成り）が効かず、

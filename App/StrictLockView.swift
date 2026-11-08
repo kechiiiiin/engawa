@@ -31,6 +31,14 @@ struct StatusHeadline: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
+
+    /// 見出しの上の日付（「11月8日 日曜日」）
+    static let day: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ja_JP")
+        f.dateFormat = "M月d日 EEEE"
+        return f
+    }()
 }
 
 /// 景色の上に中身を重ねる、ホームと同じ組み方
@@ -73,7 +81,7 @@ struct StrictLockedHome: View {
     var body: some View {
         SceneryPage(locked: true) {
             VStack(alignment: .leading, spacing: 8) {
-                Text(HomeView.day.string(from: Date()))
+                Text(StatusHeadline.day.string(from: Date()))
                     .font(.system(.footnote, weight: .medium))
                     .tracking(1)
                     .foregroundStyle(Theme.ink2)
@@ -105,7 +113,7 @@ struct StrictWaitingHome: View {
         SceneryPage(locked: false) {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(HomeView.day.string(from: Date()))
+                    Text(StatusHeadline.day.string(from: Date()))
                         .font(.system(.footnote, weight: .medium))
                         .tracking(1)
                         .foregroundStyle(Theme.ink2)
@@ -355,7 +363,7 @@ struct StrictStartSheet: View {
             TimelineView(.everyMinute) { ctx in
                 VStack(spacing: 10) {
                     ForEach(StrictLock.minuteChoices, id: \.self) { m in
-                        Button("\(AppSettings.duration(m))（\(StrictLock.clock(ctx.date.addingTimeInterval(TimeInterval(m * 60)), now: ctx.date))まで）") {
+                        Button("\(StrictLock.duration(m))（\(StrictLock.clock(ctx.date.addingTimeInterval(TimeInterval(m * 60)), now: ctx.date))まで）") {
                             withAnimation(.easeOut(duration: 0.2)) { minutes = m }
                         }
                         .buttonStyle(SecondaryButtonStyle())
@@ -412,7 +420,7 @@ struct StrictStartSheet: View {
                 Button {
                     if let e = model.startStrictLock(minutes: m) { error = e } else { dismiss() }
                 } label: {
-                    Text("\(AppSettings.duration(m))スーパーロックする").monospacedDigit()
+                    Text("\(StrictLock.duration(m))スーパーロックする").monospacedDigit()
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(keep.count > KeepApps.limit)

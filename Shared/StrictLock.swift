@@ -2,8 +2,8 @@ import Foundation
 
 // 厳格ロック（2026-11-04 本人と決定・本番設計 §9.6）。
 //
-//   時間を選んで始めたら、期限まで解除手段がないロック。ほかの層より上で、時間解除・個別解除では外れない。
-//   ロックする = 厳格 || ((手動 || 枠 || セルフ || スーパー) && !時間解除中)
+//   時間を選んで始めたら、期限まで解除手段がないロック。2026-11-08（§9.8 C）からは縁側に残る唯一のロック。
+//   ロックする = 厳格（期限 > いま）
 //   画面上の呼び方は「スーパーロック」（2026-11-08 本人・§9.8。型名は StrictLock のまま）
 //   ロック中の例外 = 許可一覧から登録したアプリ（KeepApps.registered）だけ。個別解除は足さない。ウェブサイトは全部止める
 //   ロック中はアプリの削除を禁止し、日付と時刻を自動設定に固定する（時計を進めて期限を越えさせない。§9.6）
@@ -57,15 +57,29 @@ enum StrictLock {
 
     /// 「16:00」。今日でなければ「明日 1:30」
     static func clock(_ d: Date, now: Date = Date()) -> String {
-        let t = LockReason.clock.string(from: d)
+        let t = hm.string(from: d)
         return Calendar.current.isDate(d, inSameDayAs: now) ? t : "明日 \(t)"
     }
 
     /// 残り時間の言葉（「1時間59分」「1分未満」）
     static func remaining(_ d: Date, now: Date = Date()) -> String {
         let sec = Int(d.timeIntervalSince(now).rounded(.up))
-        return sec >= 60 ? AppSettings.duration((sec + 59) / 60) : "1分未満"
+        return sec >= 60 ? duration((sec + 59) / 60) : "1分未満"
     }
+
+    /// 150 → 「2時間30分」
+    static func duration(_ minutes: Int) -> String {
+        let h = minutes / 60, m = minutes % 60
+        if h == 0 { return "\(m)分" }
+        return m == 0 ? "\(h)時間" : "\(h)時間\(m)分"
+    }
+
+    static let hm: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ja_JP")
+        f.dateFormat = "H:mm"
+        return f
+    }()
 }
 
 extension Store {

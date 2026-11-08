@@ -1,7 +1,6 @@
 import SwiftUI
 import Combine
 import UIKit
-import UserNotifications
 
 @main
 struct EngawaApp: App {
@@ -22,26 +21,20 @@ struct EngawaApp: App {
     }
 }
 
-/// 最初の画面（ホーム）。前面に来るたび R1、前面にいるあいだは20秒ごとに見回る
+/// 最初の画面（ホーム）。トークンの有無によらず同じ画面（本番設計 §9.8 C）。
+/// 前面に来るたび見直し、前面にいるあいだは20秒ごとに見回る
 struct RootView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.scenePhase) private var scenePhase
     private let timer = Timer.publish(every: 20, on: .main, in: .common).autoconnect()
-    @State private var path: [String] = []
 
     var body: some View {
-        NavigationStack(path: $path) {
-            Group {
-                // 厳格ロック中はトークンの有無によらず同じ画面。トークンなしは厳格ロックだけの画面（§9.6）
-                if model.strictLockActive {
-                    StrictLockedHome()
-                } else if Store.serverEnabled {
-                    HomeView()
-                } else {
-                    StrictWaitingHome()
-                }
+        NavigationStack {
+            if model.strictLockActive {
+                StrictLockedHome()
+            } else {
+                StrictWaitingHome()
             }
-            .navigationDestination(for: String.self) { _ in SettingsView() }
         }
         .onChange(of: scenePhase) { _, phase in
             if isDemo { return }
@@ -55,12 +48,11 @@ struct RootView: View {
             #if DEBUG
             if let mode = UIDemo.mode {
                 UIDemo.apply(mode, to: model)
-                if mode == "settings" { path = ["settings"] }
                 return
             }
             #endif
             model.refresh()
-            if model.authStatus == .notDetermined { model.requestAuth() }  // 受け入れ条件9
+            if model.authStatus == .notDetermined { model.requestAuth() }
         }
     }
 
@@ -75,13 +67,11 @@ struct RootView: View {
 
 #if DEBUG
 /// 見た目の確認用（シミュレータでスクリーンショットを撮るため）。`-engawaUIDemo <mode>` で起動したときだけ、
-/// 表示用の状態を画面の model にだけ入れ、同期・見回り・許可の要求・通知の登録をしない（シミュレータ用）。
-/// mode: usable／locked／unlocked／selflock／selflock-custom／sheet／apps／settings／
-///       superlock／superlock-sheet／super-unlock／super-unlock-reason／super-apps（スーパーロック・2026-10-16）／
-///       strict-locked／strict-sheet／strict-confirm（厳格ロック・§9.6）。Debug ビルドだけ
+/// 表示用の状態を画面の model にだけ入れ、見回り・許可の要求をしない。Debug ビルドだけ。
+/// mode: usable／strict-locked／strict-sheet／strict-confirm／keep-apps
 enum UIDemo {
     static let mode: String? = UserDefaults.standard.string(forKey: "engawaUIDemo")
-    /// 厳格ロックのシートを開いて出す: 0＝時間の選択、それ以外＝その長さの確認
+    /// スーパーロックのシートを開いて出す: 0＝時間の選択、それ以外＝その長さの確認
     static var strictSheetMinutes: Int? {
         switch mode {
         case "strict-sheet": return 0
@@ -91,177 +81,42 @@ enum UIDemo {
     }
 
     static func apply(_ mode: String, to model: AppModel) {
-        let now = Date()
         model.authStatus = .approved
-        var s = model.settings
-        s.quotaMinutes = 120
-        s.resetMinutes = 240
-        model.settings = s
-        model.unlockMessage = ""
-        model.appUnlocks = []
         switch mode {
-        case "locked", "sheet", "apps":
-            model.usage = UsageState(periodStart: ISO.now, allMin: 120)
-            model.status = LockStatus(locked: true, reason: .quota, unlockUntil: nil, unlockSource: nil, updatedAt: ISO.now)
-            model.idea = Idea(title: "外を5分歩く", subtitle: "玄関を出て、角を一つ曲がって戻ってくるだけ。")
-        case "unlocked":
-            model.usage = UsageState(periodStart: ISO.now, allMin: 120)
-            model.status = LockStatus(locked: false, reason: .quota, unlockUntil: ISO.string(now.addingTimeInterval(12 * 60)),
-                                      unlockSource: "app", updatedAt: ISO.now)
-            model.idea = Idea(title: "縁側でお茶を淹れる", subtitle: "")
-        case "superlock", "super-unlock", "super-unlock-reason", "super-apps":
-            model.usage = UsageState(periodStart: ISO.now, allMin: 48)
-            model.status = LockStatus(locked: true, reason: .none, unlockUntil: nil, unlockSource: nil, updatedAt: ISO.now,
-                                      superLockUntil: ISO.string(now.addingTimeInterval(2 * 3600)))
-            model.idea = Idea(title: "本を10ページ読む", subtitle: "読みかけの本を開いてみませんか。10ページで止めてもいい。")
         case "strict-locked":
-            model.status = LockStatus(locked: true, reason: .none, unlockUntil: nil, unlockSource: nil, updatedAt: ISO.now,
-                                      strictLockUntil: ISO.string(now.addingTimeInterval(2 * 3600)))
-        case "selflock":
-            model.usage = UsageState(periodStart: ISO.now, allMin: 48)
-            model.status = LockStatus(locked: true, reason: .selfLock, unlockUntil: nil, unlockSource: nil, updatedAt: ISO.now,
-                                      selfLockUntil: ISO.string(now.addingTimeInterval(3600)))
-            model.idea = Idea(title: "本を10ページ読む", subtitle: "読みかけの本を開いてみませんか。10ページで止めてもいい。")
-        default:   // usable／settings
-            model.usage = UsageState(periodStart: ISO.now, allMin: 48)
-            model.status = LockStatus(locked: false, reason: .none, unlockUntil: nil, unlockSource: nil, updatedAt: ISO.now)
-            model.idea = Idea(title: "縁側でお茶を淹れる", subtitle: "")
-        }
-        if mode == "settings" {
-            model.ideas = [Idea(title: "外を5分歩く", subtitle: ""), Idea(title: "縁側でお茶を淹れる", subtitle: ""),
-                           Idea(title: "本を10ページ読む", subtitle: "")]
+            model.status = LockStatus(locked: true, updatedAt: ISO.now,
+                                      strictLockUntil: ISO.string(Date().addingTimeInterval(2 * 3600)))
+        default:
+            model.status = LockStatus(locked: false, updatedAt: ISO.now)
         }
     }
 }
 #endif
 
-final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         Log.trimLog()   // log.jsonl の trim は本体だけが行う
-        LaunchConfig.importFiles()
-        LaunchConfig.migrateFromSpike()
-        Store.migrateCountModeIfNeeded()
-        LaunchConfig.applyArguments()
-        Log.add(kind: "launch", detail: Store.routes.summary)
+        Log.add(kind: "launch")
+        #if DEBUG
+        if UIDemo.mode != nil { return true }   // 見た目の確認だけ。止めの掛け外しはしない
+        #endif
+        // 旧版の監視（枠・目覚まし・解除の終わり）を止める（§9.8 C）
+        Shield.cleanupLegacy()
         // 登録の確かめの一時的な止めは、起動し直したら残さない（途中で閉じても止めが残り続けない・§9.8 B）。
         // 試し（claude/allow-verify）のストアも外す
         KeepApps.stop(route: "launch")
         KeepApps.legacyVerifyStore.clearAllSettings()
+        // サーバーは使わない（§9.8 C）: 通知の許可・APNs の登録はしない
         Shield.reconcile(route: "launch")
-
-        #if DEBUG
-        if UIDemo.mode != nil { return true }   // 見た目の確認だけ。通知の許可・APNs 登録はしない
-        #endif
-        // トークンなしの端末はプッシュを使わないので、通知の許可も APNs 登録も求めない（§9.5）
-        guard Store.serverEnabled else { return true }
-        let center = UNUserNotificationCenter.current()
-        center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
-            Log.add(kind: "notifAuth", ok: granted, error: error?.localizedDescription)
-        }
-        application.registerForRemoteNotifications()
         return true
     }
 
-    // 受け入れ条件12: APNs のデバイストークンを POST /device へ
-    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
-        DispatchQueue.global().async {
-            let body = try? JSONSerialization.data(withJSONObject: [
-                "token": hex, "env": "sandbox", "bundle": Bundle.main.bundleIdentifier ?? "",
-            ])
-            switch Net.request("POST", "/device", body: body) {
-            case .success(let (code, _)):
-                Log.add(kind: "device", ok: (200..<300).contains(code), error: (200..<300).contains(code) ? nil : "HTTP \(code)")
-            case .failure(let e):
-                Log.add(kind: "device", ok: false, error: e.localizedDescription)
-            }
-        }
-    }
-
-    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        Log.add(kind: "device", ok: false, error: "APNs 登録失敗: \(error.localizedDescription)")
-    }
-
-    // 受け入れ条件13: 経路 R2 サイレントプッシュ（終了状態では呼ばれない・公式）
-    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any],
-                     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
-        let isSilent = ((userInfo["aps"] as? [String: Any])?["content-available"] as? Int) == 1
-            && (userInfo["aps"] as? [String: Any])?["alert"] == nil
-        guard isSilent else { completionHandler(.noData); return }
-        Log.add(kind: "wake", route: "R2", detail: "state=\(UIApplication.shared.applicationState.rawValue)")
-        guard Store.routes.silentPush else { completionHandler(.noData); return }
-        DispatchQueue.global().async {
-            let r = Shield.sync(route: "R2")
-            Log.flush(timeout: 8)
-            completionHandler(r?.applied == true ? .newData : .noData)
-        }
-    }
-
-    // 端末のロックが解除された（データ保護が解けた）。本体が動いているときだけ呼ばれる
+    // 端末のロックが解除された（データ保護が解けた）。本体が動いているときだけ呼ばれる。
+    // 再起動直後は期限が読めず reconcile が何もしないので、読めるようになったここで決め直す
     func applicationProtectedDataDidBecomeAvailable(_ application: UIApplication) {
         Log.add(kind: "deviceUnlocked", detail: "state=\(application.applicationState.rawValue)")
-    }
-
-    // 前面にいるときも通知を出す
-    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
-                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .list])
-    }
-}
-
-/// 起動引数とファイル取り込み（受け入れ条件15）。値は画面・記録に出さない
-enum LaunchConfig {
-    /// `make import-token` が devicectl でアプリのコンテナ tmp/ に置くファイル。取り込んだら消す
-    static func importFiles() {
-        let tmp = FileManager.default.temporaryDirectory
-        let tokenFile = tmp.appendingPathComponent("engawa-import-token")
-        if let s = try? String(contentsOf: tokenFile, encoding: .utf8) {
-            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !t.isEmpty { Store.token = t }
-            try? FileManager.default.removeItem(at: tokenFile)
-            Log.add(kind: "import", ok: !t.isEmpty, detail: "token（値は記録しない）")
-        }
-        let serverFile = tmp.appendingPathComponent("engawa-import-server")
-        if let s = try? String(contentsOf: serverFile, encoding: .utf8) {
-            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let u = URL(string: t), u.scheme?.hasPrefix("http") == true { Store.serverURL = u }
-            try? FileManager.default.removeItem(at: serverFile)
-            Log.add(kind: "import", ok: true, detail: "server=\(t)")
-        }
-    }
-
-    /// 試作（ロックの層が1つ）から入れ替えた直後に1回だけ: 今の shield から手動ロックを推して残し、
-    /// 次の同期でサーバーの状態を読み直させる（appliedVersion を0に）
-    static func migrateFromSpike() {
-        guard Store.string("manualLock") == nil else { return }
-        let manual = Store.manualLock   // ファイルが無いときは shield と時間解除から推した値
-        Store.manualLock = manual
-        Store.appliedVersion = 0
-        Log.add(kind: "migrate", detail: "manualLock=\(manual)（試作から。次の同期でサーバーを読み直す）")
-    }
-
-    /// `-engawaRoutes poll,alertPush`（書いたものだけオン）／`-engawaServer URL`／`-engawaRegisterTest2 YES`
-    /// ⚠️ devicectl で渡すときは引数の前に `--`
-    static func applyArguments() {
-        let ud = UserDefaults.standard
-        if let csv = ud.string(forKey: "engawaRoutes") {
-            let r = Routes(csv: csv)
-            Store.routes = r
-            Log.add(kind: "routes", detail: "起動引数: \(r.summary)")
-            Wake.reconcile(r)
-        }
-        if let s = ud.string(forKey: "engawaServer"), let u = URL(string: s) {
-            Store.serverURL = u
-        }
-        if ud.bool(forKey: "engawaRegisterTest2") {
-            _ = Wake.armTest2()
-        }
-        if let n = ud.string(forKey: "engawaUsageN").flatMap(Int.init) {
-            Store.usageN = n
-            if Store.routes.usageWake { Wake.armUsage(n: n) }
-        }
+        Shield.reconcile(route: "deviceUnlocked")
     }
 }

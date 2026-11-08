@@ -42,8 +42,9 @@ class ShieldActionExtension: ShieldActionDelegate {
         default: name = String(describing: action)
         }
         Log.add(kind: "shieldAction", detail: "\(what) \(name)")
-        // 厳格ロックの期限後に残った shield は、ここでも外す（拡張の終了処理が走らなかったときの最後の網。
-        // 縁側自身は FamilyControls の認可アプリなので shield されない見込み → Shield.lockNow のコメント）
-        if Store.strictLockUntil != nil { Shield.reconcile(route: "shieldAction") }
+        // スーパーロックの期限後や旧版から残った shield は、ここでも外す（拡張の終了処理が走らなかったときの最後の網。
+        // 縁側自身は FamilyControls の認可アプリなので shield されない → Shield.lockNow のコメント）。
+        // 期限内のスーパーロックは reconcile では外れない
+        Shield.reconcile(route: "shieldAction")
     }
 }
