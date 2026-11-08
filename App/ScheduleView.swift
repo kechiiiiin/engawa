@@ -2,13 +2,13 @@ import SwiftUI
 import FamilyControls
 import ManagedSettings
 
-// 通常ロックで止めるアプリとスケジュールの画面（本番設計 §9.9）。見た目は縁側の部品（Theme.swift）。
-//   NormalAppsBlock     ホームの「通常ロックで止めるアプリ」。ロック中も選び直せて、即反映
+// 通常ロックで残すアプリとスケジュールの画面（本番設計 §9.9・§9.10）。見た目は縁側の部品（Theme.swift）。
+//   NormalAppsBlock     ホームの「通常ロックで残すアプリ」。ロック中も選び直せて、即反映
 //   ScheduleBlock       ホームのスケジュール一覧（5個まで）。ロック中も編集できるが、いまのロックは変わらない
 //   ScheduleEditSheet   曜日・ロック期間・スーパーロックの時間帯（任意・期間の内側だけ）・1日の流れの帯
 //   DayBand             0時〜24時の帯。通常ロックとスーパーロックの時間を色で出す（日をまたぐ分は左端へ回す）
 
-// MARK: - 通常ロックで止めるアプリ
+// MARK: - 通常ロックで残すアプリ（§9.10）
 
 struct NormalAppsBlock: View {
     @EnvironmentObject var model: AppModel
@@ -18,34 +18,38 @@ struct NormalAppsBlock: View {
 
     private var approved: Bool { model.authStatus == .approved }
 
+    private var caption: String {
+        if model.strictLockActive {
+            return "スーパーロック中は、ここで選んだアプリも止まります。スーパーロックのあとに通常ロックが続くときに使えます。"
+        }
+        if model.normalLockActive {
+            return "ロック中も選び直せます。足したアプリはすぐに使え、外したアプリはすぐに止まります。"
+        }
+        return "通常ロック中は、ここで選んだアプリと縁側、電話・メッセージなど iOS に最初から入っているアプリだけが使えます。ウェブサイトは止めません。カテゴリごとは選べないので、アプリを1つずつ選んでください。"
+    }
+
     var body: some View {
-        let sel = model.normalSelection
-        let apps = Array(sel.applicationTokens)
-        let cats = Array(sel.categoryTokens)
+        let apps = Array(model.normalKeep)
         VStack(alignment: .leading, spacing: 10) {
-            Text("通常ロックで止めるアプリ").sectionLabelStyle()
+            Text("通常ロックで残すアプリ").sectionLabelStyle()
             VStack(alignment: .leading, spacing: 0) {
-                if apps.isEmpty && cats.isEmpty {
-                    Text("まだ選んでいません")
+                if apps.isEmpty {
+                    Text("まだ選んでいません（縁側と iOS に最初から入っているアプリ以外は、全部止まります）")
                         .font(.callout).foregroundStyle(Theme.ink2)
                         .padding(.vertical, 12)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    ForEach(cats.prefix(4), id: \.self) { t in
-                        Label(t).foregroundStyle(Theme.ink).padding(.vertical, 10)
-                        Rectangle().fill(Theme.line).frame(height: 0.5)
-                    }
                     ForEach(apps.prefix(6), id: \.self) { t in
                         Label(t).foregroundStyle(Theme.ink).padding(.vertical, 10)
                         Rectangle().fill(Theme.line).frame(height: 0.5)
                     }
-                    let rest = max(0, apps.count - 6) + max(0, cats.count - 4)
-                    if rest > 0 {
-                        Text("ほか\(rest)個").font(.footnote).foregroundStyle(Theme.ink2).padding(.vertical, 8)
+                    if apps.count > 6 {
+                        Text("ほか\(apps.count - 6)個").font(.footnote).foregroundStyle(Theme.ink2).padding(.vertical, 8)
                         Rectangle().fill(Theme.line).frame(height: 0.5)
                     }
                 }
                 Button("選び直す…") {
-                    picking = model.normalSelection
+                    picking = NormalLock.keepSelection
                     message = nil
                     showPicker = true
                 }
@@ -59,9 +63,7 @@ struct NormalAppsBlock: View {
             }
             .padding(.horizontal, 16)
             .paperCard(radius: 14)
-            Text(model.normalLockActive
-                 ? "ロック中も選び直せます。選び直すとすぐに効きます（外したアプリはその場で使えるようになります）。"
-                 : "通常ロックで止まるのは、ここで選んだアプリだけです。ウェブサイトは止めません。")
+            Text(caption)
                 .font(.caption).foregroundStyle(Theme.ink3)
                 .fixedSize(horizontal: false, vertical: true)
             if let message {
@@ -71,8 +73,9 @@ struct NormalAppsBlock: View {
         }
         .familyActivityPicker(isPresented: $showPicker, selection: $picking)
         .onChange(of: showPicker) { _, shown in
-            guard !shown, picking != model.normalSelection else { return }
-            message = model.setNormalSelection(picking)
+            guard !shown else { return }
+            guard picking.applicationTokens != model.normalKeep || !picking.categoryTokens.isEmpty else { return }
+            message = model.setNormalKeep(picking)
         }
     }
 }

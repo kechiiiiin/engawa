@@ -3,7 +3,8 @@ import ManagedSettings
 import ManagedSettingsUI
 import UIKit
 
-// ロック画面の文言。スーパーロック中・通常ロック中は終了時刻と「閉じる」だけ（§9.6・§9.9）。スーパーロックで使うアプリの登録の確かめ中は、
+// ロック画面の文言。スーパーロック中・通常ロック中は終了時刻と「閉じる」だけ（§9.6・§9.9）。文言は2つで分ける（§9.10）。
+// 通常ロックは「残すアプリ」以外をカテゴリ（.all(except:)）で止めるので、多くは app/category 版で呼ばれる。スーパーロックで使うアプリの登録の確かめ中は、
 // 許可一覧のアプリにだけ登録のボタンを出す（§9.8 B）。
 // ネットワークは使わない（この拡張はサンドボックスで出られない・公式）。返すのが遅いと既定表示に落ちるので軽く。
 // この拡張から App Group への書き込みは届かない（2026-11-08 試しで確認）。Log.add は届けば残る程度
@@ -67,13 +68,14 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
                       subtitle: ended ? "「閉じる」を押すと、使えるようになります。" : "時間が来ると、自動で使えるようになります。")
     }
 
-    /// 通常ロック（§9.9）: 終了時刻と「閉じる」だけ
+    /// 通常ロック（§9.9・§9.10）: 終了時刻と「閉じる」だけ。残すアプリはロック中も足せることを添える
     private func normal(_ what: String, until: Date) -> ShieldConfiguration {
         let ended = until <= Date()
         Log.add(kind: "shieldShown", detail: "\(what) normal ended=\(ended)")
         return styled(icon: "flame",
-                      title: ended ? "ロックの時間が終わりました" : "\(StrictLock.clock(until)) までロック中",
-                      subtitle: ended ? "「閉じる」を押すと、使えるようになります。" : "時間が来ると、自動で使えるようになります。")
+                      title: ended ? "通常ロックの時間が終わりました" : "\(StrictLock.clock(until)) まで通常ロック中",
+                      subtitle: ended ? "「閉じる」を押すと、使えるようになります。"
+                          : "残すアプリに選んだアプリだけが使えます。縁側で残すアプリに足すと、すぐに使えるようになります。時間が来ると、自動で使えるようになります。")
     }
 
     /// スーパーロックで使うアプリの登録の確かめ（§9.8 B・Shared/KeepApps.swift）。
@@ -85,8 +87,11 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
                           subtitle: "下のボタンを押すと、スーパーロック中も使えるアプリとして登録します。",
                           secondary: "スーパーロックで使えるようにする")
         }
+        // 通常ロック中は、閉じたあとも通常ロックで止まる（残すアプリでなければ）
         return styled(icon: "xmark.seal",
                       title: "スーパーロックでは使えません",
-                      subtitle: "このアプリは登録できません。「閉じる」を押すと、ふだんどおり使えるようになります。")
+                      subtitle: NormalLock.isActive()
+                          ? "このアプリは登録できません。「閉じる」を押すと、確かめを終えます。"
+                          : "このアプリは登録できません。「閉じる」を押すと、ふだんどおり使えるようになります。")
     }
 }

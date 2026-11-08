@@ -5,9 +5,9 @@ import ManagedSettings
 // スーパーロックの画面（本番設計 §9.6・§9.8。型名は厳格ロック＝Strict のまま、画面上の呼び方はスーパーロック）。
 // 見た目は縁側の部品（Theme.swift）。
 //   StrictLockedHome   スーパーロック中のホーム。残り時間と終了時刻。解除の入口は置かない
-//                      （通常ロックで止めるアプリの選び直しとスケジュールの編集はできる。どちらもスーパーロックを弱めない）
+//                      （通常ロックで残すアプリの選び直しとスケジュールの編集はできる。どちらもスーパーロックを弱めない）
 //   StrictWaitingHome  ホーム（ロックなし・通常ロック中）。通常ロックとスーパーロックの2つの始め方（§9.9）、
-//                      通常ロックで止めるアプリ、スーパーロックで使うアプリ、スケジュール
+//                      通常ロックで残すアプリ、スーパーロックで使うアプリ、スケジュール
 //   KeepAppsSheet      スーパーロックで使うアプリ（許可一覧・標準アプリの一言・登録済み・追加する）
 //   StrictStartSheet   時間の選択 → 確認（通常ロック・スーパーロック）。「やめる」では何も変えない
 
@@ -133,7 +133,7 @@ struct StrictWaitingHome: View {
                         StatusHeadline(title: "通常ロック中", dot: Theme.caution)
                         Text("残り \(Text(StrictLock.remaining(until)).fontWeight(.semibold).foregroundStyle(Theme.ink))（\(StrictLock.clock(until)) まで）")
                             .font(.subheadline).foregroundStyle(Theme.ink2).monospacedDigit()
-                        Text("選んだアプリだけを止めています。解除はできません")
+                        Text("残すアプリ以外を止めています。解除はできません")
                             .noteStyle()
                     } else {
                         StatusHeadline(title: "使えます", dot: Theme.field)
@@ -394,7 +394,7 @@ struct StrictStartSheet: View {
     private var choose: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: "どのくらい止めますか") { dismiss() }
-            Text(kind == .normal ? "通常ロックは、選んだアプリだけを止めます。始めると、時間が来るまで解除できません。"
+            Text(kind == .normal ? "通常ロックは、残すアプリ以外のアプリを止めます。始めると、時間が来るまで解除できません。"
                                  : "始めると、時間が来るまで解除できません。")
                 .font(.subheadline).foregroundStyle(Theme.ink2)
                 .padding(.top, 6)
@@ -423,8 +423,8 @@ struct StrictStartSheet: View {
     }
 
     private func confirmNormal(_ m: Int) -> some View {
-        let sel = model.normalSelection
-        let empty = !NormalLock.hasTargets(sel)
+        let keep = model.normalKeep
+        let tooMany = keep.count > NormalLock.appLimit
         return TimelineView(.everyMinute) { ctx in
             VStack(alignment: .leading, spacing: 0) {
                 Text("\(StrictLock.clock(ctx.date.addingTimeInterval(TimeInterval(m * 60)), now: ctx.date)) まで通常ロック")
@@ -434,17 +434,18 @@ struct StrictStartSheet: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .accessibilityAddTraits(.isHeader)
-                Text("始めると、途中で止める方法はありません。止めるアプリは、ロック中も選び直せます。")
+                Text("始めると、途中で止める方法はありません。残すアプリは、ロック中も選び直せます。")
                     .font(.subheadline).foregroundStyle(Theme.ink2)
                     .lineSpacing(3)
                     .padding(.top, 6)
                     .fixedSize(horizontal: false, vertical: true)
 
                 VStack(alignment: .leading, spacing: 0) {
-                    row(title: "止まるもの", text: empty ? "まだ選んでいません。ホームの「通常ロックで止めるアプリ」で選んでください。"
-                        : "選んだアプリ\(sel.applicationTokens.count)個" + (sel.categoryTokens.isEmpty ? "" : "とカテゴリ\(sel.categoryTokens.count)個") + "。ウェブサイトは止めません。")
-                    if !empty {
-                        ForEach(Array(sel.applicationTokens.prefix(6)), id: \.self) { t in
+                    row(title: "止まるもの", text: "残すアプリと縁側以外のすべてのアプリ。電話・メッセージなど iOS に最初から入っているアプリは止まりません。ウェブサイトは止めません。")
+                    Rectangle().fill(Theme.line).frame(height: 0.5)
+                    row(title: "残すアプリ", text: keep.isEmpty ? "選んでいません。ホームの「通常ロックで残すアプリ」で、ロック中も足せます。" : "\(keep.count)個")
+                    if !keep.isEmpty {
+                        ForEach(Array(keep.prefix(6)), id: \.self) { t in
                             Label(t).foregroundStyle(Theme.ink).padding(.bottom, 8)
                         }
                     }
@@ -453,8 +454,8 @@ struct StrictStartSheet: View {
                 .paperCard(radius: 14)
                 .padding(.top, 20)
 
-                if let error {
-                    Text(error).font(.footnote).foregroundStyle(Theme.danger)
+                if let message = tooMany ? NormalLock.tooManyApps : error {
+                    Text(message).font(.footnote).foregroundStyle(Theme.danger)
                         .padding(.top, 10)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -465,7 +466,7 @@ struct StrictStartSheet: View {
                     Text("\(StrictLock.duration(m))通常ロックする").monospacedDigit()
                 }
                 .buttonStyle(PrimaryButtonStyle())
-                .disabled(empty)
+                .disabled(tooMany)
                 .padding(.top, 22)
                 Button("やめる") { dismiss() }
                     .buttonStyle(PlainWoodButtonStyle())

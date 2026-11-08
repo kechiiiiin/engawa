@@ -51,10 +51,18 @@ enum Shield {
         Set(KeepApps.registered.prefix(KeepApps.limit))
     }
 
-    /// 通常ロックで止めるもの（アプリ50個まで・カテゴリ）
-    static func normalTargets() -> (apps: Set<ApplicationToken>, categories: Set<ActivityCategoryToken>) {
-        let sel = NormalLock.selection
-        return (Set(sel.applicationTokens.prefix(NormalLock.appLimit)), sel.categoryTokens)
+    /// 通常ロック中の例外 = 残すアプリ（§9.10）と、スーパーロックで使うアプリの登録の確かめ中の候補（合わせて50個まで）。
+    /// 候補を例外に入れるのは、候補を止めるのを確かめ用のストア（アプリ単位）だけにするため。既定のストアのカテゴリでも
+    /// 止まっていると、ロック画面とボタンがアプリ版・カテゴリ版のどちらで呼ばれるか決まらず、登録できないおそれがある
+    /// （推測・要実機）。候補は確かめ用のストアで止まったままなので、使えるようにはならない。
+    /// 確かめが終われば次の reconcile で例外から外れ、通常ロックで止まる
+    static func normalExceptions() -> Set<ApplicationToken> {
+        var apps = Array(NormalLock.keepApps.prefix(NormalLock.appLimit))
+        if KeepApps.isVerifying, let pending = KeepApps.store.shield.applications {
+            let kept = Set(apps)
+            apps += pending.filter { !kept.contains($0) }.prefix(max(0, NormalLock.appLimit - apps.count))
+        }
+        return Set(apps)
     }
 
     /// 縁側自身は `apps` に入れなくても止まらない: FamilyControls で認可されたアプリは ManagedSettings の
@@ -67,11 +75,6 @@ enum Shield {
         store.shield.applicationCategories = .all(except: apps)
     }
 
-    /// 通常ロック: 選んだアプリとカテゴリだけを止める。サイトは止めない（§8.5）
-    static func lockNormal(apps: Set<ApplicationToken>, categories: Set<ActivityCategoryToken>) {
-        store.shield.applications = apps.isEmpty ? nil : apps
-        store.shield.applicationCategories = categories.isEmpty ? nil : .specific(categories)
-    }
 
     static func unlockNow() {
         store.shield.applications = nil
@@ -83,7 +86,7 @@ enum Shield {
     // MARK: 決め方（§9.9: 強い方を優先する合成はここだけで決める）
     //
     //   スーパーロックの期限 > いま            → スーパーロック（登録済みのアプリ以外を全部・ウェブサイトも全部）
-    //   そうでなく、通常ロックの期限 > いま      → 通常ロック（選んだアプリとカテゴリだけ。サイトは止めない）
+    //   そうでなく、通常ロックの期限 > いま      → 通常ロック（残すアプリ以外を全部・§9.10。サイトは止めない）
     //   どちらも無い                         → 外す
     //   スケジュールの回の中なら、頭でその回の終わりまで期限を伸ばす（Schedules.apply・縮めない）
     //   外れるのは期限が来たときだけ（resolve を通して外す）。アプリの削除の禁止と日付・時刻の自動設定の固定は
@@ -120,7 +123,7 @@ enum Shield {
             store.shield.webDomainCategories = nil
         }
         // アプリの削除の禁止と日付・時刻の自動設定の固定はスーパーロックのあいだだけ（時計を進めて期限を越えさせない）。
-        // 通常ロックは止めるアプリを選び直せる軽いロックなので掛けない（§9.9）
+        // 通常ロックは残すアプリを選び直せる軽いロックなので掛けない（§9.9・§9.10）
         if (store.application.denyAppRemoval ?? false) != isStrict {
             store.application.denyAppRemoval = isStrict ? true : nil
             Log.add(kind: "denyAppRemoval", route: route, detail: isStrict ? "禁止" : "解いた")
@@ -142,11 +145,11 @@ enum Shield {
                 rewritten = was
             }
         case .normal:
-            let t = normalTargets()
-            let key = ShieldKey.make(mode: .normal, apps: t.apps, categories: t.categories)
-            let expect = !t.apps.isEmpty || !t.categories.isEmpty
-            if was != expect || force || Store.shieldKey != key {
-                lockNormal(apps: t.apps, categories: t.categories)
+            // 止め方はスーパーロックと同じ（例外が違うだけ・§9.10）。指紋に mode が入るので、スーパーとの行き来でも書き直す
+            let apps = normalExceptions()
+            let key = ShieldKey.make(mode: .normal, apps: apps)
+            if !was || force || Store.shieldKey != key {
+                lockNow(apps: apps)
                 Store.shieldKey = key
                 rewritten = was
             }
@@ -154,13 +157,7 @@ enum Shield {
             if was || Store.shieldKey != nil { unlockNow() }
         }
         let now2 = isShielded
-        let expectShield: Bool = {
-            switch mode {
-            case .strict: return true
-            case .normal: let t = normalTargets(); return !t.apps.isEmpty || !t.categories.isEmpty
-            case .none: return false
-            }
-        }()
+        let expectShield = mode != .none
         if was != now2 || now2 != expectShield || rewritten || strictState.ended != nil || normalState.ended != nil {
             let ok = now2 == expectShield
             var detail = "mode=\(mode.rawValue)"
@@ -216,9 +213,9 @@ enum Shield {
         guard AuthorizationCenter.shared.authorizationStatus == .approved else { return "スクリーンタイムの許可がまだです。" }
         guard StrictLock.minuteChoices.contains(minutes) else { return "時間を選んでください。" }
         guard !NormalLock.isActive(now) else { return "すでに通常ロック中です。" }
-        let sel = NormalLock.selection
-        guard NormalLock.hasTargets(sel) else { return "通常ロックで止めるアプリを選んでください。" }
-        guard sel.applicationTokens.count <= NormalLock.appLimit else { return NormalLock.tooManyApps }
+        // 残すアプリは空でもよい（縁側と標準アプリ以外が全部止まる・§9.10）
+        let keep = NormalLock.keepApps
+        guard keep.count <= NormalLock.appLimit else { return NormalLock.tooManyApps }
         let until = now.addingTimeInterval(TimeInterval(minutes * 60))
         if let e = Wake.armEnd(.normalLockEnd, at: until) {
             Log.add(kind: "normalLock", route: "app", ok: false, error: e, detail: "目覚ましを予約できないので始めない")
@@ -232,22 +229,28 @@ enum Shield {
         }
         let st = reconcile(route: "normalLock", force: true)
         Log.add(LogRecord(kind: "normalLock", route: "app", locked: st.locked, appliedAt: ISO.now, ok: st.locked,
-                          detail: "minutes=\(minutes) until=\(ISO.string(until)) apps=\(sel.applicationTokens.count) categories=\(sel.categoryTokens.count)"))
+                          detail: "minutes=\(minutes) until=\(ISO.string(until)) keep=\(keep.count)"))
         return nil
     }
 
-    /// 通常ロックで止めるアプリを選び直す（§9.9: ロック中もできる・即反映）。断るときは理由
-    static func setNormalSelection(_ sel: FamilyActivitySelection) -> String? {
+    /// 通常ロックで残すアプリを選び直す（§9.10: ロック中もできる・即反映。足したアプリはその場で使え、外すとその場で止まる）。
+    /// アプリだけを使い、カテゴリとサイトは捨てる（例外に入れられない）。断るとき・捨てたものがあるときは理由
+    static func setNormalKeep(_ sel: FamilyActivitySelection) -> String? {
         guard sel.applicationTokens.count <= NormalLock.appLimit else { return NormalLock.tooManyApps }
-        NormalLock.selection = sel
-        Log.add(kind: "normalSelection", detail: "apps=\(sel.applicationTokens.count) categories=\(sel.categoryTokens.count)")
-        reconcile(route: "normalSelection")
-        return nil
+        NormalLock.keepApps = sel.applicationTokens
+        Log.add(kind: "normalKeep", detail: "apps=\(sel.applicationTokens.count) categories=\(sel.categoryTokens.count)（カテゴリは使わない）")
+        reconcile(route: "normalKeep")
+        return sel.categoryTokens.isEmpty ? nil : NormalLock.categoriesIgnored
     }
 
     /// 旧版（§9.8 C より前）が残した監視を止める。本体の起動時に毎回呼ぶ（軽い・何度呼んでも同じ）。
     /// 旧版の shield は直後の reconcile が、スーパーロック中でなければ外す
     static func cleanupLegacy() {
+        // §9.9 の「止めるアプリ」の選択は引き継がない（§9.10）
+        if FileManager.default.fileExists(atPath: Store.url(NormalLock.legacySelectionFile).path) {
+            Store.setData(NormalLock.legacySelectionFile, nil)
+            Log.add(kind: "cleanupLegacy", detail: "通常ロックの止めるアプリの選択を捨てた")
+        }
         let center = DeviceActivityCenter()
         let left = Set(center.activities).intersection(DeviceActivityName.legacy)
         guard !left.isEmpty else { return }

@@ -13,8 +13,8 @@ final class AppModel: ObservableObject {
     /// 登録の確かめ中か（候補を一時的に止めている）・止めている候補の数
     @Published var keepVerifying = KeepApps.isVerifying
     @Published var keepPending = KeepApps.pendingCount
-    /// 通常ロックで止めるアプリ（§9.9・ロック中も選び直せる）
-    @Published var normalSelection: FamilyActivitySelection = NormalLock.selection
+    /// 通常ロックで残すアプリ（§9.10・ロック中も選び直せる）
+    @Published var normalKeep: Set<ApplicationToken> = NormalLock.keepApps
     /// スケジュール（5個まで・§9.9）
     @Published var schedules: [LockSchedule] = Schedules.all
 
@@ -34,7 +34,7 @@ final class AppModel: ObservableObject {
         keepApps = KeepApps.registered
         keepVerifying = KeepApps.isVerifying
         keepPending = KeepApps.pendingCount
-        normalSelection = NormalLock.selection
+        normalKeep = NormalLock.keepApps
         schedules = Schedules.all
     }
 
@@ -84,9 +84,9 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    /// 止めるアプリを選び直す（ロック中も即反映）。断るときは理由
-    func setNormalSelection(_ sel: FamilyActivitySelection) -> String? {
-        let e = Shield.setNormalSelection(sel)
+    /// 残すアプリを選び直す（ロック中も即反映）。断るとき・カテゴリを捨てたときは理由
+    func setNormalKeep(_ sel: FamilyActivitySelection) -> String? {
+        let e = Shield.setNormalKeep(sel)
         refresh()
         return e
     }
@@ -117,12 +117,16 @@ final class AppModel: ObservableObject {
                 : "まだ登録していないアプリを、1つずつ選んでください（カテゴリでは選べません）。"
         }
         KeepApps.start(apps)
+        // 通常ロック中は候補を通常ロックの例外に入れる（Shield.normalExceptions）
+        Shield.reconcile(route: "keepVerify")
         refresh()
         return nil
     }
 
     func stopKeepVerify() {
         KeepApps.stop()
+        // 例外に入れていた候補を、通常ロック中なら通常ロックで止め直す
+        Shield.reconcile(route: "keepVerify")
         refresh()
     }
 
