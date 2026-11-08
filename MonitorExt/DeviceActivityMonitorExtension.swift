@@ -3,8 +3,8 @@ import Foundation
 import ManagedSettings
 
 // 使う監視は、ロックの終わり（.strictLockEnd・.normalLockEnd）、確定済みの回のスーパーの始まり（.runSuperStart）、
-// 最初のロック解除前の拾い直し（.retryAfterUnlock・ふつうの決め直しで拾う）と、スケジュールの毎日の予定（sched.<id>.n＝ロック期間、
-// sched.<id>.s＝スーパーロックの時間帯・Shared/Schedule.swift）（本番設計 §9.9）。
+// 最初のロック解除前の拾い直し（.retryAfterUnlock・ふつうの決め直しで拾う）と、スケジュールの毎日の予定（sched.<id>.n＝通常ロックの
+// スケジュール、sched.<id>.s＝スーパーロックのスケジュール・Shared/Schedule.swift）（本番設計 §9.9・§9.11）。合わせて最大14件（20件の上限内）。
 // どのコールバックでも記録を残し、期限とスケジュールを確かめて決め直す（期限後に止めを残さない・アプリを開かなくても切り替わる）。
 // ネットワークは使わない。メモリ上限は約6MB の報告があるので、外部ライブラリは入れない。
 // 旧版が登録した監視（枠の daily など）が呼ばれても、ここでは決め直すだけ（本体の起動時に止める）
@@ -32,7 +32,7 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
             let st = Shield.reconcile(route: activity.rawValue, hint: WakeHint(lead: Self.slack))
             done(activity, st)
         case _ where Self.isSchedule(activity):
-            // スケジュールの始まり（ロック期間・スーパーの時間帯）。少し早く呼ばれても掛けられるよう余裕を見る
+            // スケジュールの始まり（通常・スーパー）。少し早く呼ばれても掛けられるよう余裕を見る
             let st = Shield.reconcile(route: activity.rawValue, hint: WakeHint(lead: Self.slack))
             done(activity, st)
         default:

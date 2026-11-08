@@ -197,7 +197,10 @@ struct SheetHeader: View {
 /// ロック中は彩度と明るさを落とし、夕暮れの色を乗算で重ねる（0.8秒で移る）
 struct SceneryHero: View {
     var locked: Bool
-    static let height: CGFloat = 392
+    /// 2026-11-08 本人の依頼で 392 → 280（切り出しの幅・位置はそのまま、下を短く見せる）
+    static let height: CGFloat = 280
+    /// 中身を景色の下の溶けた部分へ重ねる量（392 のとき -62 だったのを高さに比例させた）
+    static let contentOverlap: CGFloat = -44
 
     var body: some View {
         GeometryReader { geo in

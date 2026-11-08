@@ -4,6 +4,7 @@ import ManagedSettingsUI
 import UIKit
 
 // ロック画面の文言。スーパーロック中・通常ロック中は終了時刻と「閉じる」だけ（§9.6・§9.9）。文言は2つで分ける（§9.10）。
+// 画面上は通常ロックを「ロック」とだけ呼ぶ（§9.11）。
 // 通常ロックは「残すアプリ」以外をカテゴリ（.all(except:)）で止めるので、多くは app/category 版で呼ばれる。スーパーロックで使うアプリの登録の確かめ中は、
 // 許可一覧のアプリにだけ登録のボタンを出す（§9.8 B）。
 // ネットワークは使わない（この拡張はサンドボックスで出られない・公式）。返すのが遅いと既定表示に落ちるので軽く。
@@ -73,7 +74,7 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         let ended = until <= Date()
         Log.add(kind: "shieldShown", detail: "\(what) normal ended=\(ended)")
         return styled(icon: "flame",
-                      title: ended ? "通常ロックの時間が終わりました" : "\(StrictLock.clock(until)) まで通常ロック中",
+                      title: ended ? "ロックの時間が終わりました" : "\(StrictLock.clock(until)) までロック中",
                       subtitle: ended ? "「閉じる」を押すと、使えるようになります。"
                           : "残すアプリに選んだアプリだけが使えます。縁側で残すアプリに足すと、すぐに使えるようになります。時間が来ると、自動で使えるようになります。")
     }

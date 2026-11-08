@@ -15,11 +15,11 @@ final class AppModel: ObservableObject {
     @Published var keepPending = KeepApps.pendingCount
     /// 通常ロックで残すアプリ（§9.10・ロック中も選び直せる）
     @Published var normalKeep: Set<ApplicationToken> = NormalLock.keepApps
-    /// スケジュール（5個まで・§9.9）
+    /// スケジュール（通常・スーパーの両方。種類ごとに5個まで・§9.11）
     @Published var schedules: [LockSchedule] = Schedules.all
 
     var strictLockUntil: Date? { status.strictLockUntil.flatMap(ISO.parse) }
-    /// スーパーロック中か（解除の入口を出さない。ホームごと StrictLockedHome になる）
+    /// スーパーロック中か（解除の入口・スーパーロックで使うアプリの登録と削除を出さない）
     var strictLockActive: Bool { strictLockUntil.map { $0 > Date() } ?? false }
     var normalLockUntil: Date? { status.normalLockUntil.flatMap(ISO.parse) }
     /// 通常ロック中か（スーパーロックと重なっていても true）

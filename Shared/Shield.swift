@@ -14,7 +14,8 @@ import CryptoKit
 extension DeviceActivityName {
     static let strictLockEnd = Self("strictLockEnd") // スーパーロック（厳格ロック）の終わり（§9.6）
     static let normalLockEnd = Self("normalLockEnd") // 通常ロックの終わり（§9.9）
-    /// 確定済みの回のスーパーの始まり（一発・§9.9。スケジュールを編集・削除しても、始まった回のスーパーは来る）。
+    /// 確定済みのスーパーの回の始まり（一発・§9.9。§9.11 では §9.9 から引き継いだ、まだ来ていないスーパーの時間帯と、
+    /// 少し早く確定した回の分。スケジュールを編集・削除しても、確定した回のスーパーは来る）。
     /// "sched." で始めない（Schedules.syncMonitoring が古い予定として外さないように）
     static let runSuperStart = Self("runSuperStart")
     /// 最初のロック解除前に起こされて何もできなかったときの拾い直し（一発・15分後）
@@ -88,7 +89,9 @@ enum Shield {
     //   スーパーロックの期限 > いま            → スーパーロック（登録済みのアプリ以外を全部・ウェブサイトも全部）
     //   そうでなく、通常ロックの期限 > いま      → 通常ロック（残すアプリ以外を全部・§9.10。サイトは止めない）
     //   どちらも無い                         → 外す
-    //   スケジュールの回の中なら、頭でその回の終わりまで期限を伸ばす（Schedules.apply・縮めない）
+    //   スケジュールの回の中なら、頭でその回の終わりまで期限を伸ばす（Schedules.apply・縮めない）。
+    //   スケジュールのスーパーも手動のスーパーと同じ期限（strictLockUntil）に入るので、削除禁止・日時固定・Web 全止めは
+    //   どちらもスーパーのあいだだけ同じに掛かる（§9.11）
     //   外れるのは期限が来たときだけ（resolve を通して外す）。アプリの削除の禁止と日付・時刻の自動設定の固定は
     //   スーパーロックのあいだだけ。スーパーが終わって通常の期限が残っていれば、通常ロックに戻る
     //
@@ -212,7 +215,7 @@ enum Shield {
         let now = Date()
         guard AuthorizationCenter.shared.authorizationStatus == .approved else { return "スクリーンタイムの許可がまだです。" }
         guard StrictLock.minuteChoices.contains(minutes) else { return "時間を選んでください。" }
-        guard !NormalLock.isActive(now) else { return "すでに通常ロック中です。" }
+        guard !NormalLock.isActive(now) else { return "すでにロック中です。" }
         // 残すアプリは空でもよい（縁側と標準アプリ以外が全部止まる・§9.10）
         let keep = NormalLock.keepApps
         guard keep.count <= NormalLock.appLimit else { return NormalLock.tooManyApps }
@@ -331,7 +334,7 @@ enum Wake {
             setPrev: { Store.strictLockEndFor = $0 }, route: route, force: forceFor == .strictLockEnd)
         arm(.normalLockEnd, target: Store.normalLockUntil, prev: Store.normalLockEndFor,
             setPrev: { Store.normalLockEndFor = $0 }, route: route, force: forceFor == .normalLockEnd)
-        arm(.runSuperStart, target: Schedules.nextRunSuperStart(after: Date()), prev: Store.runSuperStartFor,
+        arm(.runSuperStart, target: Schedules.nextRunStrictStart(after: Date()), prev: Store.runSuperStartFor,
             setPrev: { Store.runSuperStartFor = $0 }, route: route, force: forceFor == .runSuperStart)
     }
 

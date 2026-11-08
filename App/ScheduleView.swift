@@ -2,13 +2,14 @@ import SwiftUI
 import FamilyControls
 import ManagedSettings
 
-// 通常ロックで残すアプリとスケジュールの画面（本番設計 §9.9・§9.10）。見た目は縁側の部品（Theme.swift）。
-//   NormalAppsBlock     ホームの「通常ロックで残すアプリ」。ロック中も選び直せて、即反映
-//   ScheduleBlock       ホームのスケジュール一覧（5個まで）。ロック中も編集できるが、いまのロックは変わらない
-//   ScheduleEditSheet   曜日・ロック期間・スーパーロックの時間帯（任意・期間の内側だけ）・1日の流れの帯
-//   DayBand             0時〜24時の帯。通常ロックとスーパーロックの時間を色で出す（日をまたぐ分は左端へ回す）
+// 通常ロックで残すアプリとスケジュールの画面（本番設計 §9.9・§9.10・§9.11）。見た目は縁側の部品（Theme.swift）。
+// 画面上は通常ロックを「ロック」とだけ呼ぶ（§9.11）。
+//   NormalAppsBlock     ロックのタブの「残すアプリ」。ロック中も選び直せて、即反映
+//   ScheduleBlock       各タブのスケジュール一覧（種類ごとに5個まで）。ロック中も編集できるが、いまのロックは変わらない
+//   ScheduleEditSheet   曜日・時間帯・1日の流れの帯
+//   DayBand             0時〜24時の帯。時間帯を種類の色で出す（日をまたぐ分は左端へ回す）
 
-// MARK: - 通常ロックで残すアプリ（§9.10）
+// MARK: - ロックで残すアプリ（§9.10）
 
 struct NormalAppsBlock: View {
     @EnvironmentObject var model: AppModel
@@ -20,18 +21,18 @@ struct NormalAppsBlock: View {
 
     private var caption: String {
         if model.strictLockActive {
-            return "スーパーロック中は、ここで選んだアプリも止まります。スーパーロックのあとに通常ロックが続くときに使えます。"
+            return "スーパーロック中は、ここで選んだアプリも止まります。スーパーロックのあとにロックが続くときに使えます。"
         }
         if model.normalLockActive {
             return "ロック中も選び直せます。足したアプリはすぐに使え、外したアプリはすぐに止まります。"
         }
-        return "通常ロック中は、ここで選んだアプリと縁側、電話・メッセージなど iOS に最初から入っているアプリだけが使えます。ウェブサイトは止めません。カテゴリごとは選べないので、アプリを1つずつ選んでください。"
+        return "ロック中は、ここで選んだアプリと縁側、電話・メッセージなど iOS に最初から入っているアプリだけが使えます。ウェブサイトは止めません。カテゴリごとは選べないので、アプリを1つずつ選んでください。"
     }
 
     var body: some View {
         let apps = Array(model.normalKeep)
         VStack(alignment: .leading, spacing: 10) {
-            Text("通常ロックで残すアプリ").sectionLabelStyle()
+            Text("残すアプリ").sectionLabelStyle()
             VStack(alignment: .leading, spacing: 0) {
                 if apps.isEmpty {
                     Text("まだ選んでいません（縁側と iOS に最初から入っているアプリ以外は、全部止まります）")
@@ -80,31 +81,39 @@ struct NormalAppsBlock: View {
     }
 }
 
-// MARK: - スケジュール一覧
+// MARK: - スケジュール一覧（種類ごと・§9.11）
 
 struct ScheduleBlock: View {
     @EnvironmentObject var model: AppModel
+    let kind: LockKind
     @State private var editing: LockSchedule? = nil
 
     private var approved: Bool { model.authStatus == .approved }
+    private var list: [LockSchedule] { Schedules.of(kind, in: model.schedules) }
+
+    private var caption: String {
+        kind == .normal
+            ? "決まった時刻に、縁側を開かなくてもロックが掛かります。スーパーロックのスケジュールと重なったときは、スーパーロックが優先されます。"
+            : "決まった時刻に、縁側を開かなくてもスーパーロックが掛かります。終わったときにロックの時間内なら、ロックに戻ります。"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("スケジュール").sectionLabelStyle()
             VStack(alignment: .leading, spacing: 0) {
-                if model.schedules.isEmpty {
+                if list.isEmpty {
                     Text("まだありません")
                         .font(.callout).foregroundStyle(Theme.ink2)
                         .padding(.vertical, 12)
                     Rectangle().fill(Theme.line).frame(height: 0.5)
                 }
-                ForEach(model.schedules) { s in
+                ForEach(list) { s in
                     Button { editing = s } label: { ScheduleRow(schedule: s) }
                         .buttonStyle(.plain)
                     Rectangle().fill(Theme.line).frame(height: 0.5)
                 }
-                if model.schedules.count < Schedules.maxCount {
-                    Button("スケジュールを足す…") { editing = LockSchedule() }
+                if list.count < Schedules.maxCount {
+                    Button("スケジュールを足す…") { editing = LockSchedule(kind: kind) }
                         .font(.system(.body, weight: .medium))
                         .foregroundStyle(Theme.wood)
                         .padding(.vertical, 12)
@@ -120,7 +129,7 @@ struct ScheduleBlock: View {
             }
             .padding(.horizontal, 16)
             .paperCard(radius: 14)
-            Text("決まった時刻に、縁側を開かなくても通常ロックが掛かります。スーパーロックの時間帯を入れた日は、その間だけスーパーロックになります。")
+            Text(caption)
                 .font(.caption).foregroundStyle(Theme.ink3)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -130,7 +139,7 @@ struct ScheduleBlock: View {
         }
         #if DEBUG
         .onAppear {
-            if UIDemo.mode == "schedule-edit", let first = model.schedules.first { editing = first }
+            if UIDemo.mode == "schedule-edit", kind == .normal, let first = list.first { editing = first }
         }
         #endif
     }
@@ -150,10 +159,6 @@ private struct ScheduleRow: View {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink3)
             }
-            if let sup = schedule.superText {
-                Text("スーパーロック \(sup)")
-                    .font(.footnote).foregroundStyle(Theme.dusk).monospacedDigit()
-            }
             DayBand(schedule: schedule, compact: true)
         }
         .padding(.vertical, 12)
@@ -166,6 +171,8 @@ private struct ScheduleRow: View {
 struct DayBand: View {
     let schedule: LockSchedule
     var compact = false
+
+    private var color: Color { schedule.kind == .strict ? Theme.dusk : Theme.woodLight.opacity(0.45) }
 
     /// 0時からの分の区間（日をまたぐ分は2つに割る）
     private func pieces(_ a: Int, _ b: Int) -> [(Int, Int)] {
@@ -182,16 +189,9 @@ struct DayBand: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Theme.paper2)
                     ForEach(Array(pieces(schedule.start, schedule.start + schedule.length).enumerated()), id: \.offset) { _, p in
-                        Rectangle().fill(Theme.woodLight.opacity(0.45))
+                        Rectangle().fill(color)
                             .frame(width: max(1, x(p.1) - x(p.0)))
                             .offset(x: x(p.0))
-                    }
-                    if let f = schedule.superFrom, let t = schedule.superTo {
-                        ForEach(Array(pieces(schedule.start + f, schedule.start + t).enumerated()), id: \.offset) { _, p in
-                            Rectangle().fill(Theme.dusk)
-                                .frame(width: max(1, x(p.1) - x(p.0)))
-                                .offset(x: x(p.0))
-                        }
                     }
                 }
                 .clipShape(Capsule())
@@ -204,22 +204,10 @@ struct DayBand: View {
                         if h != 24 { Spacer(minLength: 0) }
                     }
                 }
-                HStack(spacing: 14) {
-                    legend(Theme.woodLight.opacity(0.45), "通常ロック")
-                    if schedule.hasSuper { legend(Theme.dusk, "スーパーロック") }
-                }
-                .padding(.top, 2)
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("ロック期間 \(schedule.periodText)" + (schedule.superText.map { "、スーパーロック \($0)" } ?? ""))
-    }
-
-    private func legend(_ c: Color, _ t: String) -> some View {
-        HStack(spacing: 6) {
-            RoundedRectangle(cornerRadius: 2).fill(c).frame(width: 14, height: 8)
-            Text(t).font(.caption).foregroundStyle(Theme.ink2)
-        }
+        .accessibilityLabel("\(schedule.kind.name) \(schedule.periodText)")
     }
 }
 
@@ -243,10 +231,16 @@ struct ScheduleEditSheet: View {
     /// 15分刻みの時刻（0:00〜23:45）
     private static let slots = Array(stride(from: 0, to: LockSchedule.dayMinutes, by: LockSchedule.step))
 
+    private var note: String {
+        s.kind == .normal
+            ? "この時間帯は、残すアプリ以外のアプリが止まります。ウェブサイトは止めません。"
+            : "この時間帯は、スーパーロックで使うアプリ以外のアプリと、すべてのウェブサイトが止まります。アプリの削除もできなくなり、日付と時刻は自動設定のままになります。"
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                SheetHeader(title: isNew ? "スケジュールを足す" : "スケジュール") { dismiss() }
+                SheetHeader(title: isNew ? "\(s.kind.name)のスケジュールを足す" : "\(s.kind.name)のスケジュール") { dismiss() }
 
                 if model.anyLockActive {
                     Text("いま掛かっているロックは変わりません。変えた中身は次の回から効きます。")
@@ -256,7 +250,7 @@ struct ScheduleEditSheet: View {
 
                 // 曜日
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("曜日（ロック期間が始まる日）").sectionLabelStyle()
+                    Text("曜日（始まる日）").sectionLabelStyle()
                     HStack(spacing: 6) {
                         ForEach(LockSchedule.weekdayOrder, id: \.self) { d in
                             let on = s.weekdays.contains(d)
@@ -275,41 +269,19 @@ struct ScheduleEditSheet: View {
                     }
                 }
 
-                // ロック期間
+                // 時間帯
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("ロック期間（通常ロック）").sectionLabelStyle()
+                    Text("時間帯").sectionLabelStyle()
                     VStack(spacing: 0) {
                         timeRow("始まり", selection: Binding(get: { s.start }, set: { setStart($0) }),
                                 options: Self.slots.map { ($0, LockSchedule.clock($0)) })
                         Rectangle().fill(Theme.line).frame(height: 0.5)
-                        timeRow("終わり", selection: Binding(get: { s.start + s.length }, set: { setEnd($0) }),
+                        timeRow("終わり", selection: Binding(get: { s.start + s.length }, set: { s.end = $0 % LockSchedule.dayMinutes }),
                                 options: endOptions)
                     }
                     .padding(.horizontal, 16)
                     .paperCard(radius: 14)
-                }
-
-                // スーパーロックの時間帯（任意）
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("その中のスーパーロック（入れなくてもよい）").sectionLabelStyle()
-                    VStack(spacing: 0) {
-                        Toggle(isOn: Binding(get: { s.hasSuper }, set: { setSuper($0) })) {
-                            Text("スーパーロックの時間帯を入れる").font(.body).foregroundStyle(Theme.ink)
-                        }
-                        .tint(Theme.wood)
-                        .padding(.vertical, 10)
-                        if s.hasSuper {
-                            Rectangle().fill(Theme.line).frame(height: 0.5)
-                            timeRow("始まり", selection: Binding(get: { s.superFrom ?? 0 }, set: { setSuperFrom($0) }),
-                                    options: superFromOptions)
-                            Rectangle().fill(Theme.line).frame(height: 0.5)
-                            timeRow("終わり", selection: Binding(get: { s.superTo ?? s.length }, set: { s.superTo = $0 }),
-                                    options: superToOptions)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .paperCard(radius: 14)
-                    Text("ロック期間の内側だけ選べます。この間は、スーパーロックで使うアプリ以外が止まり、ウェブサイトも止まります。")
+                    Text(note)
                         .font(.caption).foregroundStyle(Theme.ink3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -363,63 +335,16 @@ struct ScheduleEditSheet: View {
 
     // MARK: 選べる時刻
 
-    /// ロック期間の終わり: 始まりの15分後〜23時間45分後（翌日は「翌」）
+    /// 終わり: 始まりの15分後〜23時間45分後（翌日は「翌」）
     private var endOptions: [(Int, String)] {
         stride(from: s.start + LockSchedule.step, to: s.start + LockSchedule.dayMinutes, by: LockSchedule.step)
             .map { ($0, LockSchedule.clock($0)) }
     }
 
-    /// スーパーロックの始まり: ロック期間の始まり〜終わりの15分前（期間の始まりからの分）
-    private var superFromOptions: [(Int, String)] {
-        stride(from: 0, through: s.length - LockSchedule.step, by: LockSchedule.step)
-            .map { ($0, LockSchedule.clock(s.start + $0)) }
-    }
-
-    /// スーパーロックの終わり: スーパーの始まりの15分後〜ロック期間の終わり
-    private var superToOptions: [(Int, String)] {
-        let from = (s.superFrom ?? 0) + LockSchedule.step
-        guard from <= s.length else { return [] }
-        return stride(from: from, through: s.length, by: LockSchedule.step)
-            .map { ($0, LockSchedule.clock(s.start + $0)) }
-    }
-
-    // MARK: 変更（スーパーの時間帯がロック期間からはみ出さないよう詰める）
-
     private func setStart(_ v: Int) {
         let len = s.length
         s.start = v
         s.end = (v + len) % LockSchedule.dayMinutes   // 長さを保つ
-        clampSuper()
-    }
-
-    private func setEnd(_ v: Int) {
-        s.end = v % LockSchedule.dayMinutes
-        clampSuper()
-    }
-
-    private func setSuper(_ on: Bool) {
-        if on {
-            s.superFrom = 0
-            s.superTo = s.length
-        } else {
-            s.superFrom = nil
-            s.superTo = nil
-        }
-    }
-
-    private func setSuperFrom(_ v: Int) {
-        s.superFrom = v
-        if let t = s.superTo, t < v + LockSchedule.step { s.superTo = min(s.length, v + LockSchedule.step) }
-    }
-
-    private func clampSuper() {
-        guard let f = s.superFrom, let t = s.superTo else { return }
-        let len = s.length
-        if len < LockSchedule.step { return }
-        let nt = min(t, len)
-        let nf = min(f, nt - LockSchedule.step)
-        s.superFrom = max(0, nf)
-        s.superTo = max(s.superFrom! + LockSchedule.step, nt)
     }
 
     private func timeRow(_ title: String, selection: Binding<Int>, options: [(Int, String)]) -> some View {

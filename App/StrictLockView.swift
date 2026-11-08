@@ -2,14 +2,12 @@ import SwiftUI
 import FamilyControls
 import ManagedSettings
 
-// スーパーロックの画面（本番設計 §9.6・§9.8。型名は厳格ロック＝Strict のまま、画面上の呼び方はスーパーロック）。
-// 見た目は縁側の部品（Theme.swift）。
-//   StrictLockedHome   スーパーロック中のホーム。残り時間と終了時刻。解除の入口は置かない
-//                      （通常ロックで残すアプリの選び直しとスケジュールの編集はできる。どちらもスーパーロックを弱めない）
-//   StrictWaitingHome  ホーム（ロックなし・通常ロック中）。通常ロックとスーパーロックの2つの始め方（§9.9）、
-//                      通常ロックで残すアプリ、スーパーロックで使うアプリ、スケジュール
-//   KeepAppsSheet      スーパーロックで使うアプリ（登録済み・追加する・許可一覧と標準アプリの一言）
-//   StrictStartSheet   時間の選択 → 確認（通常ロック・スーパーロック）。「やめる」では何も変えない
+// ホームの2つのタブとスーパーロックの画面（本番設計 §9.6・§9.8・§9.11。型名は厳格ロック＝Strict のまま、画面上の呼び方は
+// スーパーロック。通常ロックは画面上「ロック」とだけ呼ぶ）。見た目は縁側の部品（Theme.swift）。
+//   LockTab           タブ1つ分（ロック／スーパーロック）。いまの状態（ロック中／解除中・残り時間）・今すぐ始める・アプリ・スケジュール。
+//                     スーパーロック中は解除の入口を置かない（残すアプリの選び直しとスケジュールの編集はできる。どちらもいまのロックを弱めない）
+//   KeepAppsSheet     スーパーロックで使うアプリ（登録済み・追加する・許可一覧と標準アプリの一言）
+//   StrictStartSheet  時間の選択 → 確認（ロック・スーパーロック）。「やめる」では何も変えない
 
 /// ホームの大きな状態の見出し（明朝＋小さな丸）
 struct StatusHeadline: View {
@@ -33,14 +31,6 @@ struct StatusHeadline: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
-
-    /// 見出しの上の日付（「11月8日 日曜日」）
-    static let day: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "ja_JP")
-        f.dateFormat = "M月d日 EEEE"
-        return f
-    }()
 }
 
 /// 景色の上に中身を重ねる、ホームと同じ組み方
@@ -55,7 +45,7 @@ private struct SceneryPage<Content: View, Actions: View>: View {
                 SceneryHero(locked: locked)
                 content
                     .padding(.horizontal, Theme.sideMargin)
-                    .padding(.top, -62)
+                    .padding(.top, SceneryHero.contentOverlap)
                     .padding(.bottom, 24)
             }
         }
@@ -75,76 +65,27 @@ private struct SceneryPage<Content: View, Actions: View>: View {
     }
 }
 
-// MARK: - ロック中のホーム
+// MARK: - タブ（§9.11）
 
-struct StrictLockedHome: View {
+struct LockTab: View {
     @EnvironmentObject var model: AppModel
-
-    var body: some View {
-        SceneryPage(locked: true) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(StatusHeadline.day.string(from: Date()))
-                    .font(.system(.footnote, weight: .medium))
-                    .tracking(1)
-                    .foregroundStyle(Theme.ink2)
-                StatusHeadline(title: "スーパーロック中", dot: Theme.dusk)
-                if let until = model.strictLockUntil {
-                    Text("残り \(Text(StrictLock.remaining(until)).fontWeight(.semibold).foregroundStyle(Theme.ink))（\(StrictLock.clock(until)) まで）")
-                        .font(.subheadline).foregroundStyle(Theme.ink2).monospacedDigit()
-                }
-                Text("解除はできません")
-                    .noteStyle()
-                if let n = model.normalLockUntil, let st = model.strictLockUntil, n > st {
-                    Text("スーパーロックが終わったあと、\(StrictLock.clock(n)) まで通常ロックが続きます。")
-                        .noteStyle()
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                VStack(alignment: .leading, spacing: 20) {
-                    NormalAppsBlock()
-                    ScheduleBlock()
-                }
-                .padding(.top, 16)
-            }
-        } actions: {
-            EmptyView()
-        }
-    }
-}
-
-// MARK: - トークンなしのホーム
-
-struct StrictWaitingHome: View {
-    @EnvironmentObject var model: AppModel
+    let kind: LockKind
     @State private var startKind: LockKind? = nil
     @State private var showKeep = false
     @State private var demoMinutes: Int? = nil
 
     private var approved: Bool { model.authStatus == .approved }
+    private var active: Bool { kind == .strict ? model.strictLockActive : model.normalLockActive }
+    private var until: Date? { kind == .strict ? model.strictLockUntil : model.normalLockUntil }
+    private var lockedDot: Color { kind == .strict ? Theme.dusk : Theme.caution }
 
     var body: some View {
-        SceneryPage(locked: false) {
+        SceneryPage(locked: active) {
             VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(StatusHeadline.day.string(from: Date()))
-                        .font(.system(.footnote, weight: .medium))
-                        .tracking(1)
-                        .foregroundStyle(Theme.ink2)
-                    if model.normalLockActive, let until = model.normalLockUntil {
-                        StatusHeadline(title: "通常ロック中", dot: Theme.caution)
-                        Text("残り \(Text(StrictLock.remaining(until)).fontWeight(.semibold).foregroundStyle(Theme.ink))（\(StrictLock.clock(until)) まで）")
-                            .font(.subheadline).foregroundStyle(Theme.ink2).monospacedDigit()
-                        Text("残すアプリ以外を止めています。解除はできません")
-                            .noteStyle()
-                    } else {
-                        StatusHeadline(title: "使えます", dot: Theme.field)
-                        Text("止めたいときに、時間を決めてロックします。")
-                            .font(.subheadline).foregroundStyle(Theme.ink2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
+                header
                 if !approved {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("スクリーンタイムの許可がまだです。スーパーロックは、許可してから使えます。")
+                        Text("スクリーンタイムの許可がまだです。\(kind.name)は、許可してから使えます。")
                             .font(.callout).foregroundStyle(Theme.ink)
                             .fixedSize(horizontal: false, vertical: true)
                         Button("スクリーンタイムを許可する") { model.requestAuth() }
@@ -153,42 +94,82 @@ struct StrictWaitingHome: View {
                     .padding(18)
                     .paperCard()
                 }
-                if model.keepVerifying {
+                if model.keepVerifying && !model.strictLockActive {
                     VerifyingNote()
                 }
-                NormalAppsBlock()
-                keepBlock
-                ScheduleBlock()
+                if kind == .normal {
+                    NormalAppsBlock()
+                } else {
+                    keepBlock
+                }
+                ScheduleBlock(kind: kind)
             }
         } actions: {
-            HStack(spacing: 10) {
-                Button(model.normalLockActive ? "通常ロック中" : "通常ロック") { startKind = .normal }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .disabled(!approved || model.normalLockActive)
-                Button("スーパーロック") { startKind = .strict }
-                    .buttonStyle(PrimaryButtonStyle())
-                    .disabled(!approved || model.keepApps.count > KeepApps.limit)
-            }
-            .padding(.horizontal, Theme.sideMargin)
-            .padding(.top, 14)
-            .padding(.bottom, 8)
-            .background(Theme.paper.ignoresSafeArea(edges: .bottom))
+            Button(active ? "\(kind.name)中" : "\(kind.name)する") { startKind = kind }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(!approved || active || (kind == .strict && model.keepApps.count > KeepApps.limit))
+                .padding(.horizontal, Theme.sideMargin)
+                .padding(.top, 14)
+                .padding(.bottom, 8)
+                .background(Theme.paper.ignoresSafeArea(edges: .bottom))
         }
-        .sheet(item: $startKind) { kind in
-            StrictStartSheet(kind: kind, initialMinutes: demoMinutes).environmentObject(model)
+        .sheet(item: $startKind) { k in
+            StrictStartSheet(kind: k, initialMinutes: demoMinutes).environmentObject(model)
         }
         .sheet(isPresented: $showKeep) {
             KeepAppsSheet().environmentObject(model)
         }
         #if DEBUG
         .onAppear {
-            if let m = UIDemo.strictSheetMinutes {
+            if let m = UIDemo.strictSheetMinutes, (UIDemo.mode == "normal-confirm") == (kind == .normal) {
                 demoMinutes = m > 0 ? m : nil
-                startKind = UIDemo.mode == "normal-confirm" ? .normal : .strict
+                startKind = kind
             }
-            if UIDemo.mode == "keep-apps" { showKeep = true }
+            if UIDemo.mode == "keep-apps", kind == .strict { showKeep = true }
         }
         #endif
+    }
+
+    /// いまの状態。見出しはこのタブのロックが掛かっているかだけ（ロック中／解除中・§9.11）。もう一方のロックとの重なりは一言で添える
+    @ViewBuilder
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            StatusHeadline(title: active ? "ロック中" : "解除中", dot: active ? lockedDot : Theme.field)
+            if active, let until {
+                Text("残り \(Text(StrictLock.remaining(until)).fontWeight(.semibold).foregroundStyle(Theme.ink))（\(StrictLock.clock(until)) まで）")
+                    .font(.subheadline).foregroundStyle(Theme.ink2).monospacedDigit()
+                Text(kind == .strict ? "解除はできません" : "残すアプリ以外を止めています。解除はできません")
+                    .noteStyle()
+            } else {
+                Text(kind == .strict
+                     ? "スーパーロックで使うアプリ以外と、すべてのウェブサイトを止めます。始めると、時間が来るまで解除できません。"
+                     : "止めたいときに、時間を決めてロックします。始めると、時間が来るまで解除できません。")
+                    .font(.subheadline).foregroundStyle(Theme.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let other = overlapNote {
+                Text(other)
+                    .noteStyle()
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// もう一方のロックとの重なり（スーパーが勝つ・スーパーのあとにロックが残れば戻る）
+    private var overlapNote: String? {
+        switch kind {
+        case .normal:
+            guard model.strictLockActive, let st = model.strictLockUntil else { return nil }
+            return model.normalLockActive
+                ? "いまは \(StrictLock.clock(st)) までスーパーロックが優先されています。ここで選んだ残すアプリも止まります。"
+                : "いまは \(StrictLock.clock(st)) までスーパーロック中です。"
+        case .strict:
+            guard model.normalLockActive, let n = model.normalLockUntil else { return nil }
+            if let st = model.strictLockUntil, model.strictLockActive {
+                return n > st ? "スーパーロックが終わったあと、\(StrictLock.clock(n)) までロックが続きます。" : nil
+            }
+            return "いまは \(StrictLock.clock(n)) までロック中です。スーパーロックを始めると、スーパーロックが優先されます。"
+        }
     }
 
     private var keepBlock: some View {
@@ -200,25 +181,32 @@ struct StrictWaitingHome: View {
                         .font(.callout).foregroundStyle(Theme.ink2)
                         .padding(.vertical, 12)
                 } else {
-                    ForEach(model.keepApps, id: \.self) { token in
+                    ForEach(Array(model.keepApps.enumerated()), id: \.element) { i, token in
                         Label(token)
                             .foregroundStyle(Theme.ink)
                             .padding(.vertical, 10)
-                        Rectangle().fill(Theme.line).frame(height: 0.5)
+                        if i < model.keepApps.count - 1 || !model.strictLockActive {
+                            Rectangle().fill(Theme.line).frame(height: 0.5)
+                        }
                     }
                 }
-                Button("登録・削除…") { showKeep = true }
-                    .font(.system(.body, weight: .medium))
-                    .foregroundStyle(Theme.wood)
-                    .padding(.vertical, 12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .buttonStyle(.plain)
-                    .disabled(!approved)
+                // スーパーロック中は追加も削除もできない（入口を出さない・§9.8 B）
+                if !model.strictLockActive {
+                    Button("登録・削除…") { showKeep = true }
+                        .font(.system(.body, weight: .medium))
+                        .foregroundStyle(Theme.wood)
+                        .padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .disabled(!approved)
+                }
             }
             .padding(.horizontal, 16)
             .paperCard(radius: 14)
-            Text("スーパーロック中も使えるアプリです。縁側は止まらないので、ロック中も開いて残り時間を見られます。電話・メッセージなど iOS に最初から入っているアプリも止まりません。")
+            Text(model.strictLockActive
+                 ? "スーパーロック中は、登録も削除もできません。"
+                 : "スーパーロック中も使えるアプリです。縁側は止まらないので、ロック中も開いて残り時間を見られます。電話・メッセージなど iOS に最初から入っているアプリも止まりません。")
                 .font(.caption).foregroundStyle(Theme.ink3)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -249,7 +237,7 @@ private struct VerifyingNote: View {
 
 // MARK: - スーパーロックで使うアプリ（§9.8 B）
 // 上から ①登録済み（削除できる）②追加する ③許可一覧と標準アプリの一言（地の文）。
-// スーパーロック中はホームごと StrictLockedHome になるのでここへは来ない（KeepApps 側でも断る）
+// スーパーロック中はタブに入口を出さないのでここへは来ない（来ても追加・削除を出さず、KeepApps 側でも断る）
 
 struct KeepAppsSheet: View {
     @EnvironmentObject var model: AppModel
@@ -347,13 +335,6 @@ struct KeepAppsSheet: View {
 
 // MARK: - 時間の選択 → 確認
 
-/// ホームの2つの始め方（§9.9）
-enum LockKind: String, Identifiable {
-    case normal, strict
-    var id: String { rawValue }
-    var name: String { self == .normal ? "通常ロック" : "スーパーロック" }
-}
-
 struct StrictStartSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -387,7 +368,7 @@ struct StrictStartSheet: View {
     private var choose: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: "どのくらい止めますか") { dismiss() }
-            Text(kind == .normal ? "通常ロックは、残すアプリ以外のアプリを止めます。始めると、時間が来るまで解除できません。"
+            Text(kind == .normal ? "ロックは、残すアプリ以外のアプリを止めます。始めると、時間が来るまで解除できません。"
                                  : "始めると、時間が来るまで解除できません。")
                 .font(.subheadline).foregroundStyle(Theme.ink2)
                 .padding(.top, 6)
@@ -420,7 +401,7 @@ struct StrictStartSheet: View {
         let tooMany = keep.count > NormalLock.appLimit
         return TimelineView(.everyMinute) { ctx in
             VStack(alignment: .leading, spacing: 0) {
-                Text("\(StrictLock.clock(ctx.date.addingTimeInterval(TimeInterval(m * 60)), now: ctx.date)) まで通常ロック")
+                Text("\(StrictLock.clock(ctx.date.addingTimeInterval(TimeInterval(m * 60)), now: ctx.date)) までロック")
                     .font(Theme.mincho(26, relativeTo: .title))
                     .tracking(1)
                     .foregroundStyle(Theme.ink)
@@ -436,7 +417,7 @@ struct StrictStartSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     row(title: "止まるもの", text: "残すアプリと縁側以外のすべてのアプリ。電話・メッセージなど iOS に最初から入っているアプリは止まりません。ウェブサイトは止めません。")
                     Rectangle().fill(Theme.line).frame(height: 0.5)
-                    row(title: "残すアプリ", text: keep.isEmpty ? "選んでいません。ホームの「通常ロックで残すアプリ」で、ロック中も足せます。" : "\(keep.count)個")
+                    row(title: "残すアプリ", text: keep.isEmpty ? "選んでいません。ロックのタブの「残すアプリ」で、ロック中も足せます。" : "\(keep.count)個")
                     if !keep.isEmpty {
                         ForEach(Array(keep.prefix(6)), id: \.self) { t in
                             Label(t).foregroundStyle(Theme.ink).padding(.bottom, 8)
@@ -456,7 +437,7 @@ struct StrictStartSheet: View {
                 Button {
                     if let e = model.startNormalLock(minutes: m) { error = e } else { dismiss() }
                 } label: {
-                    Text("\(StrictLock.duration(m))通常ロックする").monospacedDigit()
+                    Text("\(StrictLock.duration(m))ロックする").monospacedDigit()
                 }
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(tooMany)
