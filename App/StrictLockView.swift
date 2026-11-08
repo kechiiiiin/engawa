@@ -8,7 +8,7 @@ import ManagedSettings
 //                      （通常ロックで残すアプリの選び直しとスケジュールの編集はできる。どちらもスーパーロックを弱めない）
 //   StrictWaitingHome  ホーム（ロックなし・通常ロック中）。通常ロックとスーパーロックの2つの始め方（§9.9）、
 //                      通常ロックで残すアプリ、スーパーロックで使うアプリ、スケジュール
-//   KeepAppsSheet      スーパーロックで使うアプリ（許可一覧・標準アプリの一言・登録済み・追加する）
+//   KeepAppsSheet      スーパーロックで使うアプリ（登録済み・追加する・許可一覧と標準アプリの一言）
 //   StrictStartSheet   時間の選択 → 確認（通常ロック・スーパーロック）。「やめる」では何も変えない
 
 /// ホームの大きな状態の見出し（明朝＋小さな丸）
@@ -248,7 +248,7 @@ private struct VerifyingNote: View {
 }
 
 // MARK: - スーパーロックで使うアプリ（§9.8 B）
-// 上から ①許可一覧 ②標準アプリの一言 ③登録済み（削除できる）④追加する。
+// 上から ①登録済み（削除できる）②追加する ③許可一覧と標準アプリの一言（地の文）。
 // スーパーロック中はホームごと StrictLockedHome になるのでここへは来ない（KeepApps 側でも断る）
 
 struct KeepAppsSheet: View {
@@ -265,27 +265,7 @@ struct KeepAppsSheet: View {
             VStack(alignment: .leading, spacing: 22) {
                 SheetHeader(title: "スーパーロックで使うアプリ") { dismiss() }
 
-                // ① 許可一覧
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("この中から登録できます").sectionLabelStyle()
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(KeepApps.allowList.enumerated()), id: \.offset) { i, a in
-                            if i > 0 { Rectangle().fill(Theme.line).frame(height: 0.5) }
-                            Text(a.name)
-                                .font(.body).foregroundStyle(Theme.ink)
-                                .padding(.vertical, 12)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .paperCard(radius: 14)
-                    // ② 標準アプリの一言
-                    Text("電話・メッセージなど iOS に最初から入っているアプリは、スーパーロック中も使えます")
-                        .font(.footnote).foregroundStyle(Theme.ink2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                // ③ 登録済み
+                // ① 登録済み
                 VStack(alignment: .leading, spacing: 8) {
                     Text("登録済み").sectionLabelStyle()
                     VStack(alignment: .leading, spacing: 0) {
@@ -313,7 +293,7 @@ struct KeepAppsSheet: View {
                     .paperCard(radius: 14)
                 }
 
-                // ④ 追加する
+                // ② 追加する
                 if model.keepVerifying {
                     VerifyingNote()
                 } else if !model.strictLockActive {
@@ -333,6 +313,19 @@ struct KeepAppsSheet: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
+                }
+
+                // ③ 許可一覧（押せるものに見えないよう、カードにも行にもしない地の文）
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("登録できるのは次のアプリだけです")
+                        .font(.footnote.weight(.medium)).foregroundStyle(Theme.ink2)
+                    Text(KeepApps.allowList.map(\.name).joined(separator: "・"))
+                        .font(.footnote).foregroundStyle(Theme.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("電話・メッセージなど iOS に最初から入っているアプリは、登録しなくても使えます")
+                        .font(.footnote).foregroundStyle(Theme.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
                 }
             }
             .padding(.horizontal, Theme.sideMargin)
