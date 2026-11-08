@@ -35,28 +35,34 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         if let until = Store.normalLockUntil { return normal(what, until: until) }
         // スーパーロックでも確かめでもないのに止まっている（旧版の止めが残っているなど）。縁側を開けば reconcile が外す
         Log.add(kind: "shieldShown", detail: "\(what) other")
-        return styled(icon: "flame",
-                      title: "縁側のロック",
-                      subtitle: "縁側を開くと、このロックは外れます。")
+        return styled(title: "縁側のロック",
+                      subtitle: "縁側を開くと外れます。")
     }
 
-    // 色: 見出しが暗い背景に暗い文字で読めなかった（2026-11-08 試しの実機）。背景色の指定（生成り）が効かず、
-    // 暗い外観の素材の上に固定の濃い字を置いていたと見ている（推測）。背景は外観に合わせて変わる素材にし、
-    // 字は外観に合わせて変わるシステムの色（label／secondaryLabel）にする（ふだんの shield と同じ組み方）。
-    // アイコンとボタンは縁側の板の色（どちらの外観でも読める組み合わせ）
-    private static let wood = UIColor(red: 0x9A / 255, green: 0x63 / 255, blue: 0x3A / 255, alpha: 1)
+    // 見た目: 火や封印の絵は置かず、紙の色の無地に字だけ（2026-11-08 本人「質素でよい」）。
+    // 背景は外観で切り替わる単色（ぼかしなし）。ライトは縁側の紙、ダークは暗い茶。ボタンは縁側の板の色
+    private static func dyn(_ light: UInt32, _ dark: UInt32) -> UIColor {
+        func c(_ h: UInt32) -> UIColor {
+            UIColor(red: CGFloat((h >> 16) & 0xFF) / 255, green: CGFloat((h >> 8) & 0xFF) / 255, blue: CGFloat(h & 0xFF) / 255, alpha: 1)
+        }
+        return UIColor { $0.userInterfaceStyle == .dark ? c(dark) : c(light) }
+    }
+    private static let paper = dyn(0xF4ECDF, 0x2A2420)
+    private static let ink = dyn(0x3B2F25, 0xF4ECDF)
+    private static let ink2 = dyn(0x7B6A57, 0xBFB09B)
+    private static let wood = UIColor(red: 0x7A / 255, green: 0x4E / 255, blue: 0x2D / 255, alpha: 1)
     private static let onWood = UIColor(red: 0xFB / 255, green: 0xF4 / 255, blue: 0xE8 / 255, alpha: 1)
 
-    private func styled(icon: String, title: String, subtitle: String, secondary: String? = nil) -> ShieldConfiguration {
+    private func styled(title: String, subtitle: String, secondary: String? = nil) -> ShieldConfiguration {
         ShieldConfiguration(
-            backgroundBlurStyle: .systemThickMaterial,
-            backgroundColor: nil,
-            icon: UIImage(systemName: icon)?.withTintColor(Self.wood, renderingMode: .alwaysOriginal),
-            title: ShieldConfiguration.Label(text: title, color: .label),
-            subtitle: ShieldConfiguration.Label(text: subtitle, color: .secondaryLabel),
+            backgroundBlurStyle: nil,
+            backgroundColor: Self.paper,
+            icon: nil,
+            title: ShieldConfiguration.Label(text: title, color: Self.ink),
+            subtitle: ShieldConfiguration.Label(text: subtitle, color: Self.ink2),
             primaryButtonLabel: ShieldConfiguration.Label(text: "閉じる", color: Self.onWood),
             primaryButtonBackgroundColor: Self.wood,
-            secondaryButtonLabel: secondary.map { ShieldConfiguration.Label(text: $0, color: .label) }
+            secondaryButtonLabel: secondary.map { ShieldConfiguration.Label(text: $0, color: Self.ink2) }
         )
     }
 
@@ -64,35 +70,31 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
     private func strict(_ what: String, until: Date) -> ShieldConfiguration {
         let ended = until <= Date()
         Log.add(kind: "shieldShown", detail: "\(what) strict ended=\(ended)")
-        return styled(icon: "flame",
-                      title: ended ? "スーパーロックの時間が終わりました" : "\(StrictLock.clock(until)) までスーパーロック中",
-                      subtitle: ended ? "「閉じる」を押すと、使えるようになります。" : "時間が来ると、自動で使えるようになります。")
+        return styled(title: ended ? "スーパーロックの時間が終わりました" : "\(StrictLock.clock(until)) までスーパーロック中",
+                      subtitle: ended ? "「閉じる」で使えるようになります。" : "時間が来ると、自動で使えるようになります。")
     }
 
     /// 通常ロック（§9.9・§9.10）: 終了時刻と「閉じる」だけ。残すアプリはロック中も足せることを添える
     private func normal(_ what: String, until: Date) -> ShieldConfiguration {
         let ended = until <= Date()
         Log.add(kind: "shieldShown", detail: "\(what) normal ended=\(ended)")
-        return styled(icon: "flame",
-                      title: ended ? "ロックの時間が終わりました" : "\(StrictLock.clock(until)) までロック中",
-                      subtitle: ended ? "「閉じる」を押すと、使えるようになります。"
-                          : "使えるアプリだけが使えます。縁側で使えるアプリに追加すると、すぐに使えるようになります。時間が来ると、自動で使えるようになります。")
+        return styled(title: ended ? "ロックの時間が終わりました" : "\(StrictLock.clock(until)) までロック中",
+                      subtitle: ended ? "「閉じる」で使えるようになります。"
+                          : "使えるアプリだけが使えます。")
     }
 
     /// スーパーロックで使うアプリの登録の確かめ（§9.8 B・Shared/KeepApps.swift）。
     /// 許可一覧のアプリにだけ2つ目のボタンを出す。一覧外は「閉じる」だけ（押すと一時的な止めが外れる）
     private func verify(_ application: Application) -> ShieldConfiguration {
         if KeepApps.isAllowed(application.bundleIdentifier) {
-            return styled(icon: "checkmark.seal",
-                          title: "使えるアプリに追加できます",
-                          subtitle: "下のボタンを押すと、スーパーロック中も使えるアプリに追加します。",
+            return styled(title: "使えるアプリに追加できます",
+                          subtitle: "スーパーロック中も使えるようになります。",
                           secondary: "使えるアプリに追加する")
         }
         // 通常ロック中は、閉じたあとも通常ロックで止まる（残すアプリでなければ）
-        return styled(icon: "xmark.seal",
-                      title: "使えるアプリに追加できません",
+        return styled(title: "使えるアプリに追加できません",
                       subtitle: NormalLock.isActive()
-                          ? "このアプリは追加できません。「閉じる」を押すと、確かめを終えます。"
-                          : "このアプリは追加できません。「閉じる」を押すと、ふだんどおり使えるようになります。")
+                          ? "このアプリは追加できません。"
+                          : "このアプリは追加できません。")
     }
 }
