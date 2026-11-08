@@ -84,7 +84,7 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    /// 残すアプリを選び直す（ロック中も即反映）。断るとき・カテゴリを捨てたときは理由
+    /// 通常ロックの使えるアプリを追加・削除する（ロック中も即反映）。断るとき・カテゴリを捨てたときは理由
     func setNormalKeep(_ sel: FamilyActivitySelection) -> String? {
         let e = Shield.setNormalKeep(sel)
         refresh()
@@ -114,7 +114,7 @@ final class AppModel: ObservableObject {
         guard !apps.isEmpty else {
             return candidates.categoryTokens.isEmpty && candidates.applicationTokens.isEmpty
                 ? nil
-                : "まだ登録していないアプリを、1つずつ選んでください（カテゴリでは選べません）。"
+                : "まだ追加していないアプリを、1つずつ選んでください（カテゴリでは選べません）。"
         }
         KeepApps.start(apps)
         // 通常ロック中は候補を通常ロックの例外に入れる（Shield.normalExceptions）

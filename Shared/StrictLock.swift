@@ -21,7 +21,7 @@ enum StrictLock {
     static let minuteChoices = [30, 60, 120, 240, 480]
     static let fileKey = "strictLockUntil"
     /// 残すアプリが多すぎるときの断り（ホームの注意・確認画面・Shield で同じ言葉）
-    static var tooManyKeepApps: String { "スーパーロックで使えるアプリは\(KeepApps.limit)個までです。登録を減らしてください。" }
+    static var tooManyKeepApps: String { "スーパーロックの使えるアプリは\(KeepApps.limit)個までです。削除してから追加してください。" }
     static func isActive(_ now: Date = Date()) -> Bool {
         Store.strictLockUntil.map { $0 > now } ?? false
     }

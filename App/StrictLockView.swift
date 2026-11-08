@@ -5,8 +5,8 @@ import ManagedSettings
 // ホームの2つのタブとスーパーロックの画面（本番設計 §9.6・§9.8・§9.11。型名は厳格ロック＝Strict のまま、画面上の呼び方は
 // スーパーロック。通常ロックは画面上「ロック」とだけ呼ぶ）。見た目は縁側の部品（Theme.swift）。
 //   LockTab           タブ1つ分（ロック／スーパーロック）。いまの状態（ロック中／解除中・残り時間）・今すぐ始める・アプリ・スケジュール。
-//                     スーパーロック中は解除の入口を置かない（残すアプリの選び直しとスケジュールの編集はできる。どちらもいまのロックを弱めない）
-//   KeepAppsSheet     スーパーロックで使うアプリ（登録済み・追加する・許可一覧と標準アプリの一言）
+//                     スーパーロック中は解除の入口を置かない（使えるアプリの追加・削除とスケジュールの編集はできる。どちらもいまのロックを弱めない）
+//   KeepAppsSheet     使えるアプリ（一覧・追加する・許可一覧と標準アプリの一言）
 //   StrictStartSheet  時間の選択 → 確認（ロック・スーパーロック）。「やめる」では何も変えない
 
 /// ホームの大きな状態の見出し（明朝＋小さな丸）
@@ -138,11 +138,11 @@ struct LockTab: View {
             if active, let until {
                 Text("残り \(Text(StrictLock.remaining(until)).fontWeight(.semibold).foregroundStyle(Theme.ink))（\(StrictLock.clock(until)) まで）")
                     .font(.subheadline).foregroundStyle(Theme.ink2).monospacedDigit()
-                Text(kind == .strict ? "解除はできません" : "残すアプリ以外を止めています。解除はできません")
+                Text(kind == .strict ? "解除はできません" : "使えるアプリ以外を止めています。解除はできません")
                     .noteStyle()
             } else {
                 Text(kind == .strict
-                     ? "スーパーロックで使うアプリ以外と、すべてのウェブサイトを止めます。始めると、時間が来るまで解除できません。"
+                     ? "使えるアプリ以外と、すべてのウェブサイトを止めます。始めると、時間が来るまで解除できません。"
                      : "止めたいときに、時間を決めてロックします。始めると、時間が来るまで解除できません。")
                     .font(.subheadline).foregroundStyle(Theme.ink2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -161,7 +161,7 @@ struct LockTab: View {
         case .normal:
             guard model.strictLockActive, let st = model.strictLockUntil else { return nil }
             return model.normalLockActive
-                ? "いまは \(StrictLock.clock(st)) までスーパーロックが優先されています。ここで選んだ残すアプリも止まります。"
+                ? "いまは \(StrictLock.clock(st)) までスーパーロックが優先されています。ここにある使えるアプリも止まります。"
                 : "いまは \(StrictLock.clock(st)) までスーパーロック中です。"
         case .strict:
             guard model.normalLockActive, let n = model.normalLockUntil else { return nil }
@@ -174,10 +174,10 @@ struct LockTab: View {
 
     private var keepBlock: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("スーパーロックで使うアプリ").sectionLabelStyle()
+            Text("使えるアプリ").sectionLabelStyle()
             VStack(alignment: .leading, spacing: 0) {
                 if model.keepApps.isEmpty {
-                    Text("まだ登録していません")
+                    Text("まだ追加していません")
                         .font(.callout).foregroundStyle(Theme.ink2)
                         .padding(.vertical, 12)
                 } else {
@@ -192,7 +192,7 @@ struct LockTab: View {
                 }
                 // スーパーロック中は追加も削除もできない（入口を出さない・§9.8 B）
                 if !model.strictLockActive {
-                    Button("登録・削除…") { showKeep = true }
+                    Button("追加・削除…") { showKeep = true }
                         .font(.system(.body, weight: .medium))
                         .foregroundStyle(Theme.wood)
                         .padding(.vertical, 12)
@@ -205,7 +205,7 @@ struct LockTab: View {
             .padding(.horizontal, 16)
             .paperCard(radius: 14)
             Text(model.strictLockActive
-                 ? "スーパーロック中は、登録も削除もできません。"
+                 ? "スーパーロック中は、追加も削除もできません。"
                  : "スーパーロック中も使えるアプリです。縁側は止まらないので、ロック中も開いて残り時間を見られます。電話・メッセージなど iOS に最初から入っているアプリも止まりません。")
                 .font(.caption).foregroundStyle(Theme.ink3)
                 .fixedSize(horizontal: false, vertical: true)
@@ -213,7 +213,7 @@ struct LockTab: View {
     }
 }
 
-/// 登録の確かめ中の案内（ホームとシートで共用）。「終える」で一時的な止めを全部外す
+/// 追加の確かめ中の案内（ホームとシートで共用）。「終える」で一時的な止めを全部外す
 private struct VerifyingNote: View {
     @EnvironmentObject var model: AppModel
 
@@ -221,7 +221,7 @@ private struct VerifyingNote: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("確かめ中のアプリが\(model.keepPending)個あります")
                 .font(.system(.callout, weight: .semibold)).foregroundStyle(Theme.ink)
-            Text("選んだアプリを1つずつ開いて、出てきた画面の「スーパーロックで使えるようにする」を押してください。一覧にないアプリは「閉じる」だけが出て、登録できません。")
+            Text("選んだアプリを1つずつ開いて、出てきた画面の「使えるアプリに追加する」を押すと追加されます。一覧にないアプリは「閉じる」だけが出て、追加できません。")
                 .font(.callout).foregroundStyle(Theme.ink2)
                 .fixedSize(horizontal: false, vertical: true)
             Text("確かめ中のアプリは、終えるまで一時的に止まっています。")
@@ -235,8 +235,8 @@ private struct VerifyingNote: View {
     }
 }
 
-// MARK: - スーパーロックで使うアプリ（§9.8 B）
-// 上から ①登録済み（削除できる）②追加する ③許可一覧と標準アプリの一言（地の文）。
+// MARK: - スーパーロックの使えるアプリ（§9.8 B）
+// 上から ①使えるアプリ（削除できる）②追加する ③許可一覧と標準アプリの一言（地の文）。
 // スーパーロック中はタブに入口を出さないのでここへは来ない（来ても追加・削除を出さず、KeepApps 側でも断る）
 
 struct KeepAppsSheet: View {
@@ -251,14 +251,14 @@ struct KeepAppsSheet: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                SheetHeader(title: "スーパーロックで使うアプリ") { dismiss() }
+                SheetHeader(title: "使えるアプリ") { dismiss() }
 
                 // ① 登録済み
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("登録済み").sectionLabelStyle()
+                    Text("使えるアプリ").sectionLabelStyle()
                     VStack(alignment: .leading, spacing: 0) {
                         if model.keepApps.isEmpty {
-                            Text("まだ登録していません")
+                            Text("まだ追加していません")
                                 .font(.callout).foregroundStyle(Theme.ink2)
                                 .padding(.vertical, 12)
                         }
@@ -293,7 +293,7 @@ struct KeepAppsSheet: View {
                         }
                         .buttonStyle(PrimaryButtonStyle())
                         .disabled(!approved)
-                        Text("登録したいアプリを選ぶと、そのアプリを一時的に止めます。開いて出てきた画面のボタンで登録します。")
+                        Text("追加したいアプリを選ぶと、そのアプリを一時的に止めます。開いて出てきた画面のボタンで追加します。")
                             .font(.footnote).foregroundStyle(Theme.ink3)
                             .fixedSize(horizontal: false, vertical: true)
                         if let message {
@@ -305,12 +305,12 @@ struct KeepAppsSheet: View {
 
                 // ③ 許可一覧（押せるものに見えないよう、カードにも行にもしない地の文）
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("登録できるのは次のアプリだけです")
+                    Text("追加できるのは次のアプリだけです")
                         .font(.footnote.weight(.medium)).foregroundStyle(Theme.ink2)
                     Text(KeepApps.allowList.map(\.name).joined(separator: "・"))
                         .font(.footnote).foregroundStyle(Theme.ink2)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("電話・メッセージなど iOS に最初から入っているアプリは、登録しなくても使えます")
+                    Text("電話・メッセージなど iOS に最初から入っているアプリは、追加しなくても使えます")
                         .font(.footnote).foregroundStyle(Theme.ink2)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 4)
@@ -324,7 +324,7 @@ struct KeepAppsSheet: View {
         .presentationDragIndicator(.visible)
         .presentationBackground(Theme.paper)
         .presentationCornerRadius(28)
-        .familyActivityPicker(isPresented: $showPicker, selection: $candidates)
+        .familyActivityPicker(headerText: "名前を検索欄に打つと、カテゴリを開かずに選べます", isPresented: $showPicker, selection: $candidates)
         .onChange(of: showPicker) { _, shown in
             // ピッカーを閉じたら、選んだ候補で確かめを始める（何も選ばずに閉じたら何もしない）
             guard !shown else { return }
@@ -368,7 +368,7 @@ struct StrictStartSheet: View {
     private var choose: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: "どのくらい止めますか") { dismiss() }
-            Text(kind == .normal ? "ロックは、残すアプリ以外のアプリを止めます。始めると、時間が来るまで解除できません。"
+            Text(kind == .normal ? "ロックは、使えるアプリ以外のアプリを止めます。始めると、時間が来るまで解除できません。"
                                  : "始めると、時間が来るまで解除できません。")
                 .font(.subheadline).foregroundStyle(Theme.ink2)
                 .padding(.top, 6)
@@ -408,16 +408,16 @@ struct StrictStartSheet: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
                     .accessibilityAddTraits(.isHeader)
-                Text("始めると、途中で止める方法はありません。残すアプリは、ロック中も選び直せます。")
+                Text("始めると、途中で止める方法はありません。使えるアプリは、ロック中も追加・削除できます。")
                     .font(.subheadline).foregroundStyle(Theme.ink2)
                     .lineSpacing(3)
                     .padding(.top, 6)
                     .fixedSize(horizontal: false, vertical: true)
 
                 VStack(alignment: .leading, spacing: 0) {
-                    row(title: "止まるもの", text: "残すアプリと縁側以外のすべてのアプリ。電話・メッセージなど iOS に最初から入っているアプリは止まりません。ウェブサイトは止めません。")
+                    row(title: "止まるもの", text: "使えるアプリと縁側以外のすべてのアプリ。電話・メッセージなど iOS に最初から入っているアプリは止まりません。ウェブサイトは止めません。")
                     Rectangle().fill(Theme.line).frame(height: 0.5)
-                    row(title: "残すアプリ", text: keep.isEmpty ? "選んでいません。ロックのタブの「残すアプリ」で、ロック中も足せます。" : "\(keep.count)個")
+                    row(title: "使えるアプリ", text: keep.isEmpty ? "追加していません。ロックのタブの「使えるアプリ」で、ロック中も追加できます。" : "\(keep.count)個")
                     if !keep.isEmpty {
                         ForEach(Array(keep.prefix(6)), id: \.self) { t in
                             Label(t).foregroundStyle(Theme.ink).padding(.bottom, 8)
@@ -467,11 +467,11 @@ struct StrictStartSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 VStack(alignment: .leading, spacing: 0) {
-                    row(title: "止まるもの", text: "スーパーロックで使うアプリと縁側以外のすべてのアプリと、すべてのウェブサイト。電話・メッセージなど iOS に最初から入っているアプリは止まりません。")
+                    row(title: "止まるもの", text: "使えるアプリと縁側以外のすべてのアプリと、すべてのウェブサイト。電話・メッセージなど iOS に最初から入っているアプリは止まりません。")
                     Rectangle().fill(Theme.line).frame(height: 0.5)
                     row(title: "変えられなくなるもの", text: "この iPhone のアプリは、どれも削除できなくなります。日付と時刻も自動設定のままになります。")
                     Rectangle().fill(Theme.line).frame(height: 0.5)
-                    row(title: "使えるアプリ", text: keep.isEmpty ? "登録していません。縁側は開けるので、残り時間はいつでも見られます。" : "\(keep.count)個")
+                    row(title: "使えるアプリ", text: keep.isEmpty ? "追加していません。縁側は開けるので、残り時間はいつでも見られます。" : "\(keep.count)個")
                     if !keep.isEmpty {
                         ForEach(Array(keep.prefix(6)), id: \.self) { t in
                             Label(t).foregroundStyle(Theme.ink).padding(.bottom, 8)

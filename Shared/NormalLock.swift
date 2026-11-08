@@ -26,8 +26,8 @@ enum NormalLock {
     static let legacySelectionFile = "normal-selection.json"
     /// 残すアプリの上限（ManagedSettings の例外は50個まで）
     static let appLimit = 50
-    static var tooManyApps: String { "ロックで残すアプリは\(appLimit)個までです。選び直してください。" }
-    static let categoriesIgnored = "カテゴリごとは残せません。アプリを1つずつ選んでください（選んだアプリだけを残しました）。"
+    static var tooManyApps: String { "ロックの使えるアプリは\(appLimit)個までです。削除してから追加してください。" }
+    static let categoriesIgnored = "カテゴリごとは追加できません。アプリを1つずつ選んでください（選んだアプリだけを追加しました）。"
 
     static func isActive(_ now: Date = Date()) -> Bool {
         Store.normalLockUntil.map { $0 > now } ?? false

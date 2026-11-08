@@ -76,7 +76,7 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         return styled(icon: "flame",
                       title: ended ? "ロックの時間が終わりました" : "\(StrictLock.clock(until)) までロック中",
                       subtitle: ended ? "「閉じる」を押すと、使えるようになります。"
-                          : "残すアプリに選んだアプリだけが使えます。縁側で残すアプリに足すと、すぐに使えるようになります。時間が来ると、自動で使えるようになります。")
+                          : "使えるアプリだけが使えます。縁側で使えるアプリに追加すると、すぐに使えるようになります。時間が来ると、自動で使えるようになります。")
     }
 
     /// スーパーロックで使うアプリの登録の確かめ（§9.8 B・Shared/KeepApps.swift）。
@@ -84,15 +84,15 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
     private func verify(_ application: Application) -> ShieldConfiguration {
         if KeepApps.isAllowed(application.bundleIdentifier) {
             return styled(icon: "checkmark.seal",
-                          title: "スーパーロックで使えるアプリです",
-                          subtitle: "下のボタンを押すと、スーパーロック中も使えるアプリとして登録します。",
-                          secondary: "スーパーロックで使えるようにする")
+                          title: "使えるアプリに追加できます",
+                          subtitle: "下のボタンを押すと、スーパーロック中も使えるアプリに追加します。",
+                          secondary: "使えるアプリに追加する")
         }
         // 通常ロック中は、閉じたあとも通常ロックで止まる（残すアプリでなければ）
         return styled(icon: "xmark.seal",
-                      title: "スーパーロックでは使えません",
+                      title: "使えるアプリに追加できません",
                       subtitle: NormalLock.isActive()
-                          ? "このアプリは登録できません。「閉じる」を押すと、確かめを終えます。"
-                          : "このアプリは登録できません。「閉じる」を押すと、ふだんどおり使えるようになります。")
+                          ? "このアプリは追加できません。「閉じる」を押すと、確かめを終えます。"
+                          : "このアプリは追加できません。「閉じる」を押すと、ふだんどおり使えるようになります。")
     }
 }

@@ -2,14 +2,14 @@ import SwiftUI
 import FamilyControls
 import ManagedSettings
 
-// 通常ロックで残すアプリとスケジュールの画面（本番設計 §9.9・§9.10・§9.11）。見た目は縁側の部品（Theme.swift）。
+// 通常ロックの使えるアプリとスケジュールの画面（本番設計 §9.9・§9.10・§9.11）。見た目は縁側の部品（Theme.swift）。
 // 画面上は通常ロックを「ロック」とだけ呼ぶ（§9.11）。
-//   NormalAppsBlock     ロックのタブの「残すアプリ」。ロック中も選び直せて、即反映
+//   NormalAppsBlock     ロックのタブの「使えるアプリ」。ロック中も追加・削除できて、即反映
 //   ScheduleBlock       各タブのスケジュール一覧（種類ごとに5個まで）。ロック中も編集できるが、いまのロックは変わらない
 //   ScheduleEditSheet   曜日・時間帯・1日の流れの帯
 //   DayBand             0時〜24時の帯。時間帯を種類の色で出す（日をまたぐ分は左端へ回す）
 
-// MARK: - ロックで残すアプリ（§9.10）
+// MARK: - ロックの使えるアプリ（§9.10）
 
 struct NormalAppsBlock: View {
     @EnvironmentObject var model: AppModel
@@ -21,35 +21,46 @@ struct NormalAppsBlock: View {
 
     private var caption: String {
         if model.strictLockActive {
-            return "スーパーロック中は、ここで選んだアプリも止まります。スーパーロックのあとにロックが続くときに使えます。"
+            return "スーパーロック中は、ここにある使えるアプリも止まります。スーパーロックのあとにロックが続くときに使えます。"
         }
         if model.normalLockActive {
-            return "ロック中も選び直せます。足したアプリはすぐに使え、外したアプリはすぐに止まります。"
+            return "ロック中も追加と削除ができます。追加したアプリはすぐに使え、削除したアプリはすぐに止まります。"
         }
-        return "ロック中は、ここで選んだアプリと縁側、電話・メッセージなど iOS に最初から入っているアプリだけが使えます。ウェブサイトは止めません。カテゴリごとは選べないので、アプリを1つずつ選んでください。"
+        return "ロック中は、ここにある使えるアプリと縁側、電話・メッセージなど iOS に最初から入っているアプリだけが使えます。ウェブサイトは止めません。カテゴリごとは追加できないので、アプリを1つずつ選んでください。"
+    }
+
+    /// 1つだけ削除する（ロック中も即反映）
+    private func remove(_ token: ApplicationToken) {
+        var sel = NormalLock.keepSelection
+        sel.applicationTokens.remove(token)
+        message = model.setNormalKeep(sel)
     }
 
     var body: some View {
         let apps = Array(model.normalKeep)
         VStack(alignment: .leading, spacing: 10) {
-            Text("残すアプリ").sectionLabelStyle()
+            Text("使えるアプリ").sectionLabelStyle()
             VStack(alignment: .leading, spacing: 0) {
                 if apps.isEmpty {
-                    Text("まだ選んでいません（縁側と iOS に最初から入っているアプリ以外は、全部止まります）")
+                    Text("まだ追加していません（縁側と iOS に最初から入っているアプリ以外は、全部止まります）")
                         .font(.callout).foregroundStyle(Theme.ink2)
                         .padding(.vertical, 12)
                         .fixedSize(horizontal: false, vertical: true)
                 } else {
-                    ForEach(apps.prefix(6), id: \.self) { t in
-                        Label(t).foregroundStyle(Theme.ink).padding(.vertical, 10)
-                        Rectangle().fill(Theme.line).frame(height: 0.5)
-                    }
-                    if apps.count > 6 {
-                        Text("ほか\(apps.count - 6)個").font(.footnote).foregroundStyle(Theme.ink2).padding(.vertical, 8)
+                    ForEach(apps, id: \.self) { t in
+                        HStack {
+                            Label(t).foregroundStyle(Theme.ink)
+                            Spacer(minLength: 12)
+                            Button("削除") { remove(t) }
+                                .font(.system(.callout, weight: .medium))
+                                .foregroundStyle(Theme.danger)
+                                .buttonStyle(.plain)
+                        }
+                        .padding(.vertical, 10)
                         Rectangle().fill(Theme.line).frame(height: 0.5)
                     }
                 }
-                Button("選び直す…") {
+                Button("追加する…") {
                     picking = NormalLock.keepSelection
                     message = nil
                     showPicker = true
@@ -72,7 +83,7 @@ struct NormalAppsBlock: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .familyActivityPicker(isPresented: $showPicker, selection: $picking)
+        .familyActivityPicker(headerText: "名前を検索欄に打つと、カテゴリを開かずに選べます", isPresented: $showPicker, selection: $picking)
         .onChange(of: showPicker) { _, shown in
             guard !shown else { return }
             guard picking.applicationTokens != model.normalKeep || !picking.categoryTokens.isEmpty else { return }
@@ -113,7 +124,7 @@ struct ScheduleBlock: View {
                     Rectangle().fill(Theme.line).frame(height: 0.5)
                 }
                 if list.count < Schedules.maxCount {
-                    Button("スケジュールを足す…") { editing = LockSchedule(kind: kind) }
+                    Button("スケジュールを追加…") { editing = LockSchedule(kind: kind) }
                         .font(.system(.body, weight: .medium))
                         .foregroundStyle(Theme.wood)
                         .padding(.vertical, 12)
@@ -233,14 +244,14 @@ struct ScheduleEditSheet: View {
 
     private var note: String {
         s.kind == .normal
-            ? "この時間帯は、残すアプリ以外のアプリが止まります。ウェブサイトは止めません。"
-            : "この時間帯は、スーパーロックで使うアプリ以外のアプリと、すべてのウェブサイトが止まります。アプリの削除もできなくなり、日付と時刻は自動設定のままになります。"
+            ? "この時間帯は、使えるアプリ以外のアプリが止まります。ウェブサイトは止めません。"
+            : "この時間帯は、使えるアプリ以外のアプリと、すべてのウェブサイトが止まります。アプリの削除もできなくなり、日付と時刻は自動設定のままになります。"
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                SheetHeader(title: isNew ? "\(s.kind.name)のスケジュールを足す" : "\(s.kind.name)のスケジュール") { dismiss() }
+                SheetHeader(title: isNew ? "\(s.kind.name)のスケジュールを追加" : "\(s.kind.name)のスケジュール") { dismiss() }
 
                 if model.anyLockActive {
                     Text("いま掛かっているロックは変わりません。変えた中身は次の回から効きます。")

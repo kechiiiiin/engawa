@@ -372,7 +372,7 @@ enum Schedules {
                     error: errors.isEmpty ? nil : errors.joined(separator: " / "),
                     detail: "登録=\(desired.count) 外した=\(stale.count) 全体=\(center.activities.count)")
         }
-        return errors.isEmpty ? nil : "スケジュールの予定を iOS に登録できませんでした。時刻を変えてもう一度お試しください。"
+        return errors.isEmpty ? nil : "スケジュールの予定を iOS に設定できませんでした。時刻を変えてもう一度お試しください。"
     }
 
     private static func same(_ a: DeviceActivitySchedule, _ b: DeviceActivitySchedule) -> Bool {
