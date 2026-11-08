@@ -20,9 +20,9 @@ enum StrictLock {
     /// 選べる長さ（分）
     static let minuteChoices = [30, 60, 120, 240, 480]
     /// 自分で決める長さの下限（分）。下げるときはここだけ直す（画面の検証・断り文・Shield の受け入れが追従する）
-    static let customMinMinutes = 15
+    static let customMinMinutes = 1
     /// 自分で決める長さの分のきざみ（ホイール）
-    static let customStep = 15
+    static let customStep = 1
     /// 自分で決める長さの範囲（分）。下限〜24時間（LockTimer.maxAhead と同じ上限）
     static let customMinutes = customMinMinutes...1440
     static var customRangeText: String { "\(duration(customMinMinutes))から24時間までで選んでください。" }
