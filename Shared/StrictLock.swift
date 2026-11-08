@@ -4,7 +4,8 @@ import Foundation
 //
 //   時間を選んで始めたら、期限まで解除手段がないロック。ほかの層より上で、時間解除・個別解除では外れない。
 //   ロックする = 厳格 || ((手動 || 枠 || セルフ || スーパー) && !時間解除中)
-//   ロック中の例外 = 残すアプリ（スーパーロックの一覧を共用）だけ。個別解除は足さない
+//   画面上の呼び方は「スーパーロック」（2026-11-08 本人・§9.8。型名は StrictLock のまま）
+//   ロック中の例外 = 許可一覧から登録したアプリ（KeepApps.registered）だけ。個別解除は足さない。ウェブサイトは全部止める
 //   ロック中はアプリの削除を禁止し、日付と時刻を自動設定に固定する（時計を進めて期限を越えさせない。§9.6）
 //
 //   - 始めるのは Shield.startStrictLock だけ。外れるのは期限が来たときだけ（Shield.reconcile が resolve を通して外す）
@@ -19,7 +20,7 @@ enum StrictLock {
     static let minuteChoices = [30, 60, 120, 240, 480]
     static let fileKey = "strictLockUntil"
     /// 残すアプリが多すぎるときの断り（ホームの注意・確認画面・Shield で同じ言葉）
-    static var tooManyKeepApps: String { "残せるアプリは\(AppUnlocks.limit)個までです。残すアプリを減らしてください。" }
+    static var tooManyKeepApps: String { "スーパーロックで使えるアプリは\(KeepApps.limit)個までです。登録を減らしてください。" }
     /// 期限がいまより先すぎるときの切り詰め先（秒）。最長の長さ
     static var maxDuration: TimeInterval { TimeInterval((minuteChoices.max() ?? 480) * 60) }
 

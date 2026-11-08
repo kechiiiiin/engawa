@@ -10,11 +10,13 @@ import UIKit
 class ShieldConfigurationExtension: ShieldConfigurationDataSource {
 
     override func configuration(shielding application: Application) -> ShieldConfiguration {
-        make("app")
+        if Store.strictLockUntil == nil, KeepApps.isVerifying { return verify(application) }
+        return make("app")
     }
 
     override func configuration(shielding application: Application, in category: ActivityCategory) -> ShieldConfiguration {
-        make("app/category")
+        if Store.strictLockUntil == nil, KeepApps.isVerifying { return verify(application) }
+        return make("app/category")
     }
 
     override func configuration(shielding webDomain: WebDomain) -> ShieldConfiguration {
@@ -41,24 +43,46 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         )
     }
 
-    /// 厳格ロック（§9.6）: 終了時刻と「閉じる」だけ。色は縁側の生成りと板（Theme と同じ値）
+    // 色: 見出しが暗い背景に暗い文字で読めなかった（2026-11-08 試しの実機）。背景色の指定（生成り）が効かず、
+    // 暗い外観の素材の上に固定の濃い字を置いていたと見ている（推測）。背景は外観に合わせて変わる素材にし、
+    // 字は外観に合わせて変わるシステムの色（label／secondaryLabel）にする（ふだんの shield と同じ組み方）。
+    // アイコンとボタンは縁側の板の色（どちらの外観でも読める組み合わせ）
+    private static let wood = UIColor(red: 0x9A / 255, green: 0x63 / 255, blue: 0x3A / 255, alpha: 1)
+    private static let onWood = UIColor(red: 0xFB / 255, green: 0xF4 / 255, blue: 0xE8 / 255, alpha: 1)
+
+    private func styled(icon: String, title: String, subtitle: String, secondary: String? = nil) -> ShieldConfiguration {
+        ShieldConfiguration(
+            backgroundBlurStyle: .systemThickMaterial,
+            backgroundColor: nil,
+            icon: UIImage(systemName: icon)?.withTintColor(Self.wood, renderingMode: .alwaysOriginal),
+            title: ShieldConfiguration.Label(text: title, color: .label),
+            subtitle: ShieldConfiguration.Label(text: subtitle, color: .secondaryLabel),
+            primaryButtonLabel: ShieldConfiguration.Label(text: "閉じる", color: Self.onWood),
+            primaryButtonBackgroundColor: Self.wood,
+            secondaryButtonLabel: secondary.map { ShieldConfiguration.Label(text: $0, color: .label) }
+        )
+    }
+
+    /// 厳格ロック（画面上の呼び方はスーパーロック・§9.6／§9.8）: 終了時刻と「閉じる」だけ
     private func strict(_ what: String, until: Date) -> ShieldConfiguration {
-        let ink = UIColor(red: 0x3B / 255, green: 0x2F / 255, blue: 0x25 / 255, alpha: 1)
-        let ink2 = UIColor(red: 0x7B / 255, green: 0x6A / 255, blue: 0x57 / 255, alpha: 1)
-        let wood = UIColor(red: 0x7A / 255, green: 0x4E / 255, blue: 0x2D / 255, alpha: 1)
-        let paper = UIColor(red: 0xF4 / 255, green: 0xEC / 255, blue: 0xDF / 255, alpha: 1)
-        let onWood = UIColor(red: 0xFB / 255, green: 0xF4 / 255, blue: 0xE8 / 255, alpha: 1)
         let ended = until <= Date()
         Log.add(kind: "shieldShown", detail: "\(what) strict ended=\(ended)")
-        return ShieldConfiguration(
-            backgroundBlurStyle: nil,
-            backgroundColor: paper,
-            icon: UIImage(systemName: "flame")?.withTintColor(wood, renderingMode: .alwaysOriginal),
-            title: ShieldConfiguration.Label(text: ended ? "ロックの時間が終わりました" : "\(StrictLock.clock(until)) までロック中", color: ink),
-            subtitle: ShieldConfiguration.Label(text: ended ? "「閉じる」を押すと、使えるようになります。" : "時間が来ると、自動で使えるようになります。", color: ink2),
-            primaryButtonLabel: ShieldConfiguration.Label(text: "閉じる", color: onWood),
-            primaryButtonBackgroundColor: wood,
-            secondaryButtonLabel: nil
-        )
+        return styled(icon: "flame",
+                      title: ended ? "スーパーロックの時間が終わりました" : "\(StrictLock.clock(until)) までスーパーロック中",
+                      subtitle: ended ? "「閉じる」を押すと、使えるようになります。" : "時間が来ると、自動で使えるようになります。")
+    }
+
+    /// スーパーロックで使うアプリの登録の確かめ（§9.8 B・Shared/KeepApps.swift）。
+    /// 許可一覧のアプリにだけ2つ目のボタンを出す。一覧外は「閉じる」だけ（押すと一時的な止めが外れる）
+    private func verify(_ application: Application) -> ShieldConfiguration {
+        if KeepApps.isAllowed(application.bundleIdentifier) {
+            return styled(icon: "checkmark.seal",
+                          title: "スーパーロックで使えるアプリです",
+                          subtitle: "下のボタンを押すと、スーパーロック中も使えるアプリとして登録します。",
+                          secondary: "スーパーロックで使えるようにする")
+        }
+        return styled(icon: "xmark.seal",
+                      title: "スーパーロックでは使えません",
+                      subtitle: "このアプリは登録できません。「閉じる」を押すと、ふだんどおり使えるようになります。")
     }
 }

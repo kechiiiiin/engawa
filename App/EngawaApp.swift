@@ -145,6 +145,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         Store.migrateCountModeIfNeeded()
         LaunchConfig.applyArguments()
         Log.add(kind: "launch", detail: Store.routes.summary)
+        // 登録の確かめの一時的な止めは、起動し直したら残さない（途中で閉じても止めが残り続けない・§9.8 B）。
+        // 試し（claude/allow-verify）のストアも外す
+        KeepApps.stop(route: "launch")
+        KeepApps.legacyVerifyStore.clearAllSettings()
         Shield.reconcile(route: "launch")
 
         #if DEBUG

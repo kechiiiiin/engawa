@@ -41,13 +41,17 @@ enum Shield {
 
     static var isShielded: Bool { store.shield.applicationCategories != nil }
 
-    /// ロック中も使える土台の一覧。厳格ロック・スーパーロック中は「残すアプリ」、それ以外は許可アプリ
+    /// ロック中も使える土台の一覧。書き写しのスーパーロック中は「残すアプリ」、それ以外は許可アプリ
     static func baseSelection(_ now: Date = Date()) -> FamilyActivitySelection {
-        StrictLock.isActive(now) || SuperLock.isActive(now) ? SuperLock.loadSelection() : loadSelection()
+        SuperLock.isActive(now) ? SuperLock.loadSelection() : loadSelection()
     }
 
-    /// 例外 = 土台（許可アプリ／スーパーロック中は残すアプリ）∪ 個別に解除中のアプリ（合わせて50個まで。超える分の個別解除は入れない）
+    /// 例外 = 土台（許可アプリ／スーパーロック中は残すアプリ）∪ 個別に解除中のアプリ（合わせて50個まで。超える分の個別解除は入れない）。
+    /// 厳格ロック（画面上の呼び方はスーパーロック・§9.8）中は、許可一覧から登録済みのアプリ（KeepApps.registered）だけ
     static func exceptions(_ now: Date = Date()) -> (apps: Set<ApplicationToken>, domains: Set<WebDomainToken>, dropped: Int) {
+        if StrictLock.isActive(now) {
+            return (Set(KeepApps.registered.prefix(KeepApps.limit)), [], 0)
+        }
         let sel = baseSelection(now)
         var apps = sel.applicationTokens
         var dropped = 0
@@ -58,15 +62,14 @@ enum Shield {
         return (apps, sel.webDomainTokens, dropped)
     }
 
-    /// ウェブサイトの制限はしない（2026-10-19 本人判断: アプリ単位だけで止める）。
-    /// domains は ShieldKey の指紋用に受け取るだけで、webDomainCategories には反映しない。
+    /// ウェブサイトの制限はふだんはしない（2026-10-19 本人判断: アプリ単位だけで止める）。webDomainCategories は
+    /// reconcile が厳格ロックの有無だけで決める（厳格ロック中だけ .all()・§9.8）。domains は ShieldKey の指紋用に受け取るだけ。
     /// 縁側自身は `apps` に入れなくても止まらない: FamilyControls で認可されたアプリは ManagedSettings の
     /// block・shield の対象外（Apple Frameworks Engineer, 2025-05, developer.apple.com/forums/thread/783310）。
     /// 自分の ApplicationToken はコードで作れない（Token は Codable の init だけ・SDK の swiftinterface）ので、
     /// 例外に足す手段も無い。厳格ロックの「残すアプリ」の文言はこれを前提にしている（実機で確かめる）
     static func lockNow(apps: Set<ApplicationToken>, domains: Set<WebDomainToken>) {
         store.shield.applicationCategories = .all(except: apps)
-        store.shield.webDomainCategories = nil
         Store.shieldKey = ShieldKey.make(apps: apps, domains: domains)
     }
 
@@ -210,10 +213,12 @@ enum Shield {
         let until = Store.unlockUntil
         let shouldLock = strict != nil || ((reason != .none || superLock != nil) && until == nil)
 
-        // ウェブサイトの制限は使わない（2026-10-19 本人判断）。旧版からの引き継ぎ・入れ替え直後で
-        // webDomainCategories が掛かった状態のままでも、reconcile を1回通れば必ず外す（自己修復）。
-        // shouldLock／exceptChanged の分岐に関係なく、毎回ここで確かめる。
-        if store.shield.webDomainCategories != nil {
+        // ウェブサイト: ふだんは止めない（2026-10-19 本人判断・§8.5）。厳格ロック（画面上はスーパーロック）中だけ
+        // すべてのサイトを止める（§9.8・2026-11-08 本人）。旧版からの引き継ぎで掛かったままの分も、
+        // 厳格ロックでなければ reconcile を1回通れば必ず外す（自己修復）。shield の分岐に関係なく、毎回ここで合わせる
+        if strict != nil {
+            if store.shield.webDomainCategories == nil { store.shield.webDomainCategories = .all() }
+        } else if store.shield.webDomainCategories != nil {
             store.shield.webDomainCategories = nil
         }
         // アプリの削除の禁止と日付・時刻の自動設定の固定は厳格ロックのあいだだけ（時計を進めて期限を越えさせない）。
@@ -422,12 +427,14 @@ enum Shield {
         guard AuthorizationCenter.shared.authorizationStatus == .approved else { return "スクリーンタイムの許可がまだです。" }
         guard StrictLock.minuteChoices.contains(minutes) else { return "時間を選んでください。" }
         guard !StrictLock.isActive(now) else { return "すでにロック中です。" }
-        guard SuperLock.loadSelection().applicationTokens.count <= AppUnlocks.limit else { return StrictLock.tooManyKeepApps }
+        guard KeepApps.registered.count <= KeepApps.limit else { return StrictLock.tooManyKeepApps }
         let until = now.addingTimeInterval(TimeInterval(minutes * 60))
         if let e = Wake.armStrictEnd(at: until) {
             Log.add(kind: "strictLock", route: "app", ok: false, error: e, detail: "目覚ましを予約できないので始めない")
             return "ロックの終わりを予約できませんでした。もう一度お試しください。"
         }
+        // 登録の確かめ中なら終える（一時的な止めを残さない・ロック中は登録できない）
+        KeepApps.stop(route: "strictLock")
         Store.strictLockEndFor = until
         Store.strictLockUntil = until
         guard Store.strictLockUntil != nil else {
@@ -440,7 +447,7 @@ enum Shield {
         let st = reconcile(route: "strictLock", force: true)
         Log.add(LogRecord(kind: "strictLock", route: "app", version: Store.appliedVersion, locked: st.locked,
                           appliedAt: ISO.now, ok: st.locked && isShielded,
-                          detail: "minutes=\(minutes) until=\(ISO.string(until)) keepApps=\(SuperLock.loadSelection().applicationTokens.count)"))
+                          detail: "minutes=\(minutes) until=\(ISO.string(until)) keepApps=\(KeepApps.registered.count)"))
         return nil
     }
 

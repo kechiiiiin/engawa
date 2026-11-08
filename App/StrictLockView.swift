@@ -1,9 +1,12 @@
 import SwiftUI
 import FamilyControls
+import ManagedSettings
 
-// 厳格ロックの画面（本番設計 §9.6）。見た目は HomeView と同じ部品（Theme.swift）。
-//   StrictLockedHome   ロック中のホーム。残り時間と終了時刻だけで、操作を置かない（トークンの有無によらない）
-//   StrictWaitingHome  トークンなしのホーム。許可 → 残すアプリ → ロックを始める
+// スーパーロックの画面（本番設計 §9.6・§9.8。型名は厳格ロック＝Strict のまま、画面上の呼び方はスーパーロック）。
+// 見た目は縁側の部品（Theme.swift）。
+//   StrictLockedHome   ロック中のホーム。残り時間と終了時刻だけで、操作を置かない
+//   StrictWaitingHome  ホーム。許可 → スーパーロックで使うアプリ → スーパーロックを始める
+//   KeepAppsSheet      スーパーロックで使うアプリ（許可一覧・標準アプリの一言・登録済み・追加する）
 //   StrictStartSheet   時間の選択 → 確認。「やめる」では何も変えない
 
 /// ホームの大きな状態の見出し（明朝＋小さな丸）
@@ -74,7 +77,7 @@ struct StrictLockedHome: View {
                     .font(.system(.footnote, weight: .medium))
                     .tracking(1)
                     .foregroundStyle(Theme.ink2)
-                StatusHeadline(title: "ロック中", dot: Theme.dusk)
+                StatusHeadline(title: "スーパーロック中", dot: Theme.dusk)
                 if let until = model.strictLockUntil {
                     Text("残り \(Text(StrictLock.remaining(until)).fontWeight(.semibold).foregroundStyle(Theme.ink))（\(StrictLock.clock(until)) まで）")
                         .font(.subheadline).foregroundStyle(Theme.ink2).monospacedDigit()
@@ -92,8 +95,8 @@ struct StrictLockedHome: View {
 
 struct StrictWaitingHome: View {
     @EnvironmentObject var model: AppModel
-    @State private var showPicker = false
     @State private var showStart = false
+    @State private var showKeep = false
     @State private var demoMinutes: Int?
 
     private var approved: Bool { model.authStatus == .approved }
@@ -107,13 +110,13 @@ struct StrictWaitingHome: View {
                         .tracking(1)
                         .foregroundStyle(Theme.ink2)
                     StatusHeadline(title: "使えます", dot: Theme.field)
-                    Text("止めたいときに、時間を決めてロックします。")
+                    Text("止めたいときに、時間を決めてスーパーロックします。")
                         .font(.subheadline).foregroundStyle(Theme.ink2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if !approved {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("スクリーンタイムの許可がまだです。ロックは、許可してから使えます。")
+                        Text("スクリーンタイムの許可がまだです。スーパーロックは、許可してから使えます。")
                             .font(.callout).foregroundStyle(Theme.ink)
                             .fixedSize(horizontal: false, vertical: true)
                         Button("スクリーンタイムを許可する") { model.requestAuth() }
@@ -122,45 +125,51 @@ struct StrictWaitingHome: View {
                     .padding(18)
                     .paperCard()
                 }
+                if model.keepVerifying {
+                    VerifyingNote()
+                }
                 keepBlock
             }
         } actions: {
-            Button("ロックを始める") { showStart = true }
+            Button("スーパーロックを始める") { showStart = true }
                 .buttonStyle(PrimaryButtonStyle())
-                .disabled(!approved || model.superSelection.applicationTokens.count > AppUnlocks.limit)
+                .disabled(!approved || model.keepApps.count > KeepApps.limit)
                 .padding(.horizontal, Theme.sideMargin)
                 .padding(.top, 14)
                 .padding(.bottom, 8)
                 .background(Theme.paper.ignoresSafeArea(edges: .bottom))
         }
-        .familyActivityPicker(isPresented: $showPicker, selection: $model.superSelection)
-        .onChange(of: model.superSelection) { _, s in model.saveSuperSelection(s) }
         .sheet(isPresented: $showStart) {
             StrictStartSheet(initialMinutes: demoMinutes).environmentObject(model)
         }
+        .sheet(isPresented: $showKeep) {
+            KeepAppsSheet().environmentObject(model)
+        }
         #if DEBUG
-        .onAppear { if let m = UIDemo.strictSheetMinutes { demoMinutes = m > 0 ? m : nil; showStart = true } }
+        .onAppear {
+            if let m = UIDemo.strictSheetMinutes { demoMinutes = m > 0 ? m : nil; showStart = true }
+            if UIDemo.mode == "keep-apps" { showKeep = true }
+        }
         #endif
     }
 
     private var keepBlock: some View {
-        let sel = model.superSelection
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("残すアプリ").sectionLabelStyle()
+        VStack(alignment: .leading, spacing: 10) {
+            Text("スーパーロックで使うアプリ").sectionLabelStyle()
             VStack(alignment: .leading, spacing: 0) {
-                if sel.applicationTokens.isEmpty {
-                    Text("まだ選んでいません")
+                if model.keepApps.isEmpty {
+                    Text("まだ登録していません")
                         .font(.callout).foregroundStyle(Theme.ink2)
                         .padding(.vertical, 12)
                 } else {
-                    ForEach(Array(sel.applicationTokens), id: \.self) { token in
+                    ForEach(model.keepApps, id: \.self) { token in
                         Label(token)
                             .foregroundStyle(Theme.ink)
                             .padding(.vertical, 10)
                         Rectangle().fill(Theme.line).frame(height: 0.5)
                     }
                 }
-                Button(sel.applicationTokens.isEmpty ? "アプリを選ぶ…" : "選び直す…") { showPicker = true }
+                Button("登録・削除…") { showKeep = true }
                     .font(.system(.body, weight: .medium))
                     .foregroundStyle(Theme.wood)
                     .padding(.vertical, 12)
@@ -171,18 +180,136 @@ struct StrictWaitingHome: View {
             }
             .padding(.horizontal, 16)
             .paperCard(radius: 14)
-            if sel.applicationTokens.count > AppUnlocks.limit {
-                Text(StrictLock.tooManyKeepApps)
-                    .font(.footnote).foregroundStyle(Theme.danger)
-            }
-            if !sel.categoryTokens.isEmpty {
-                Text("カテゴリで選んだものは残りません。アプリを個別に選んでください。")
-                    .font(.footnote).foregroundStyle(Theme.caution)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Text("ロック中も使えるアプリです。縁側は選ばなくても止まらないので、ロック中も開いて残り時間を見られます。電話などは iOS の仕様で止まりません。")
+            Text("スーパーロック中も使えるアプリです。縁側は止まらないので、ロック中も開いて残り時間を見られます。電話・メッセージなど iOS に最初から入っているアプリも止まりません。")
                 .font(.caption).foregroundStyle(Theme.ink3)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// 登録の確かめ中の案内（ホームとシートで共用）。「終える」で一時的な止めを全部外す
+private struct VerifyingNote: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("確かめ中のアプリが\(model.keepPending)個あります")
+                .font(.system(.callout, weight: .semibold)).foregroundStyle(Theme.ink)
+            Text("選んだアプリを1つずつ開いて、出てきた画面の「スーパーロックで使えるようにする」を押してください。一覧にないアプリは「閉じる」だけが出て、登録できません。")
+                .font(.callout).foregroundStyle(Theme.ink2)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("確かめ中のアプリは、終えるまで一時的に止まっています。")
+                .font(.footnote).foregroundStyle(Theme.ink3)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("終える") { model.stopKeepVerify() }
+                .buttonStyle(SecondaryButtonStyle())
+        }
+        .padding(18)
+        .paperCard()
+    }
+}
+
+// MARK: - スーパーロックで使うアプリ（§9.8 B）
+// 上から ①許可一覧 ②標準アプリの一言 ③登録済み（削除できる）④追加する。
+// スーパーロック中はホームごと StrictLockedHome になるのでここへは来ない（KeepApps 側でも断る）
+
+struct KeepAppsSheet: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var candidates = FamilyActivitySelection()
+    @State private var showPicker = false
+    @State private var message: String?
+
+    private var approved: Bool { model.authStatus == .approved }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                SheetHeader(title: "スーパーロックで使うアプリ") { dismiss() }
+
+                // ① 許可一覧
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("この中から登録できます").sectionLabelStyle()
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(KeepApps.allowList.enumerated()), id: \.offset) { i, a in
+                            if i > 0 { Rectangle().fill(Theme.line).frame(height: 0.5) }
+                            Text(a.name)
+                                .font(.body).foregroundStyle(Theme.ink)
+                                .padding(.vertical, 12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .paperCard(radius: 14)
+                    // ② 標準アプリの一言
+                    Text("電話・メッセージなど iOS に最初から入っているアプリは、スーパーロック中も使えます")
+                        .font(.footnote).foregroundStyle(Theme.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // ③ 登録済み
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("登録済み").sectionLabelStyle()
+                    VStack(alignment: .leading, spacing: 0) {
+                        if model.keepApps.isEmpty {
+                            Text("まだ登録していません")
+                                .font(.callout).foregroundStyle(Theme.ink2)
+                                .padding(.vertical, 12)
+                        }
+                        ForEach(Array(model.keepApps.enumerated()), id: \.element) { i, token in
+                            if i > 0 { Rectangle().fill(Theme.line).frame(height: 0.5) }
+                            HStack {
+                                Label(token).foregroundStyle(Theme.ink)
+                                Spacer(minLength: 12)
+                                if !model.strictLockActive {
+                                    Button("削除") { model.removeKeepApp(token) }
+                                        .font(.system(.callout, weight: .medium))
+                                        .foregroundStyle(Theme.danger)
+                                        .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.vertical, 10)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .paperCard(radius: 14)
+                }
+
+                // ④ 追加する
+                if model.keepVerifying {
+                    VerifyingNote()
+                } else if !model.strictLockActive {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button("追加する…") {
+                            candidates = FamilyActivitySelection()
+                            message = nil
+                            showPicker = true
+                        }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(!approved)
+                        Text("登録したいアプリを選ぶと、そのアプリを一時的に止めます。開いて出てきた画面のボタンで登録します。")
+                            .font(.footnote).foregroundStyle(Theme.ink3)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let message {
+                            Text(message).font(.footnote).foregroundStyle(Theme.danger)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, Theme.sideMargin)
+            .padding(.top, 22)
+            .padding(.bottom, 16)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Theme.paper)
+        .presentationCornerRadius(28)
+        .familyActivityPicker(isPresented: $showPicker, selection: $candidates)
+        .onChange(of: showPicker) { _, shown in
+            // ピッカーを閉じたら、選んだ候補で確かめを始める（何も選ばずに閉じたら何もしない）
+            guard !shown else { return }
+            message = model.startKeepVerify(candidates)
         }
     }
 }
@@ -244,7 +371,7 @@ struct StrictStartSheet: View {
     }
 
     private func confirm(_ m: Int) -> some View {
-        let keep = model.superSelection.applicationTokens
+        let keep = model.keepApps
         return TimelineView(.everyMinute) { ctx in
             VStack(alignment: .leading, spacing: 0) {
                 Text("\(StrictLock.clock(ctx.date.addingTimeInterval(TimeInterval(m * 60)), now: ctx.date)) まで解除できません")
@@ -261,11 +388,11 @@ struct StrictStartSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 VStack(alignment: .leading, spacing: 0) {
-                    row(title: "止まるもの", text: "残すアプリと縁側以外のすべて。電話などは iOS の仕様で止まりません。")
+                    row(title: "止まるもの", text: "スーパーロックで使うアプリと縁側以外のすべてのアプリと、すべてのウェブサイト。電話・メッセージなど iOS に最初から入っているアプリは止まりません。")
                     Rectangle().fill(Theme.line).frame(height: 0.5)
                     row(title: "変えられなくなるもの", text: "この iPhone のアプリは、どれも削除できなくなります。日付と時刻も自動設定のままになります。")
                     Rectangle().fill(Theme.line).frame(height: 0.5)
-                    row(title: "残すアプリ", text: keep.isEmpty ? "ありません。縁側は開けるので、残り時間はいつでも見られます。" : "\(keep.count)個")
+                    row(title: "使えるアプリ", text: keep.isEmpty ? "登録していません。縁側は開けるので、残り時間はいつでも見られます。" : "\(keep.count)個")
                     if !keep.isEmpty {
                         ForEach(Array(keep.prefix(6)), id: \.self) { t in
                             Label(t).foregroundStyle(Theme.ink).padding(.bottom, 8)
@@ -276,7 +403,7 @@ struct StrictStartSheet: View {
                 .paperCard(radius: 14)
                 .padding(.top, 20)
 
-                if let message = keep.count > AppUnlocks.limit ? StrictLock.tooManyKeepApps : error {
+                if let message = keep.count > KeepApps.limit ? StrictLock.tooManyKeepApps : error {
                     Text(message).font(.footnote).foregroundStyle(Theme.danger)
                         .padding(.top, 10)
                         .fixedSize(horizontal: false, vertical: true)
@@ -285,10 +412,10 @@ struct StrictStartSheet: View {
                 Button {
                     if let e = model.startStrictLock(minutes: m) { error = e } else { dismiss() }
                 } label: {
-                    Text("\(AppSettings.duration(m))ロックする").monospacedDigit()
+                    Text("\(AppSettings.duration(m))スーパーロックする").monospacedDigit()
                 }
                 .buttonStyle(PrimaryButtonStyle())
-                .disabled(keep.count > AppUnlocks.limit)
+                .disabled(keep.count > KeepApps.limit)
                 .padding(.top, 22)
                 Button("やめる") { dismiss() }
                     .buttonStyle(PlainWoodButtonStyle())

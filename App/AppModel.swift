@@ -1,6 +1,7 @@
 import SwiftUI
 import FamilyControls
 import DeviceActivity
+import ManagedSettings
 
 // 本体の状態。ホーム・設定・開発者向けで共有する。
 // 重い処理（通信・同期）はメインスレッドの外で行う（Net は同期待ちのため）。
@@ -20,6 +21,11 @@ final class AppModel: ObservableObject {
     @Published var unlockMessage: String = ""
     /// 個別に解除中のアプリ（終わりの早い順）
     @Published var appUnlocks: [AppUnlock] = AppUnlocks.active()
+    /// スーパーロックで使うアプリ（許可一覧から登録したもの・§9.8 B）
+    @Published var keepApps: [ApplicationToken] = KeepApps.registered
+    /// 登録の確かめ中か（候補を一時的に止めている）・止めている候補の数
+    @Published var keepVerifying = KeepApps.isVerifying
+    @Published var keepPending = KeepApps.pendingCount
 
     // --- 開発者向け（試作の計測用） ---
     @Published var catsSelection: FamilyActivitySelection = Shield.loadCatsSelection()
@@ -62,6 +68,9 @@ final class AppModel: ObservableObject {
         authStatus = AuthorizationCenter.shared.authorizationStatus
         status = Shield.status
         appUnlocks = AppUnlocks.active()
+        keepApps = KeepApps.registered
+        keepVerifying = KeepApps.isVerifying
+        keepPending = KeepApps.pendingCount
         usage = Quota.usage()
         settings = Store.settings
         shielded = Shield.isShielded
@@ -218,7 +227,33 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    // MARK: スーパーロック（残すアプリだけを使えるロック）
+    // MARK: スーパーロックで使うアプリ（§9.8 B）
+
+    /// 候補を一時的に止めて確かめを始める。断るときは理由を返す
+    func startKeepVerify(_ candidates: FamilyActivitySelection) -> String? {
+        guard !StrictLock.isActive() else { return "スーパーロック中は追加できません。" }
+        let apps = candidates.applicationTokens.subtracting(KeepApps.registeredSet)
+        guard !apps.isEmpty else {
+            return candidates.categoryTokens.isEmpty && candidates.applicationTokens.isEmpty
+                ? nil
+                : "まだ登録していないアプリを、1つずつ選んでください（カテゴリでは選べません）。"
+        }
+        KeepApps.start(apps)
+        refreshHome()
+        return nil
+    }
+
+    func stopKeepVerify() {
+        KeepApps.stop()
+        refreshHome()
+    }
+
+    func removeKeepApp(_ token: ApplicationToken) {
+        KeepApps.remove(token)
+        refreshHome()
+    }
+
+    // MARK: スーパーロック（書き写しで解除できる旧版・残すアプリだけを使えるロック）
 
     func startSuperLock(_ choice: SelfLock.Choice) {
         startSuperLock(until: choice.until(), choice: choice.rawValue)

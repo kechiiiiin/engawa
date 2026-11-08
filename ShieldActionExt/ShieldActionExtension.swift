@@ -1,14 +1,24 @@
 import Foundation
 import ManagedSettings
 
-// ボタンは「閉じる」だけ。押された記録を残して .close を返す（ネットワークには出ない）。
-// 厳格ロックの期限が過ぎていれば、ここで外す。
+// ボタンは「閉じる」（登録の確かめ中の許可一覧のアプリだけ「スーパーロックで使えるようにする」も）。
+// 押された記録を残して .close を返す（ネットワークには出ない）。厳格ロックの期限が過ぎていれば、ここで外す。
 
 class ShieldActionExtension: ShieldActionDelegate {
 
     override func handle(action: ShieldAction, for application: ApplicationToken,
                          completionHandler: @escaping (ShieldActionResponse) -> Void) {
         record(action, "app")
+        // スーパーロックで使うアプリの登録の確かめ（§9.8 B・Shared/KeepApps.swift）。候補はアプリ単位で止めているので
+        // ここ（app トークン版）に来る。2つ目のボタン（許可一覧のアプリにだけ出る）で登録、「閉じる」は登録せずに外す。
+        // どちらもその候補の一時的な止めを外し、.close（開き直すと使える）
+        if KeepApps.isVerifying, Store.strictLockUntil == nil {
+            if action == .secondaryButtonPressed {
+                KeepApps.register(application)
+            } else {
+                KeepApps.release(application)
+            }
+        }
         completionHandler(.close)
     }
 
