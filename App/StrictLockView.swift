@@ -343,12 +343,20 @@ struct StrictStartSheet: View {
     var initialMinutes: Int? = nil
     @State private var minutes: Int? = nil
     @State private var error: String? = nil
+    private enum Custom { case length, time }
+    @State private var custom: Custom? = nil
+    @State private var pickHours = 1
+    @State private var pickMinutes = 0
+    @State private var pickTime = Date()
+    @State private var customError: String? = nil
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if let minutes {
                     confirm(minutes)
+                } else if let custom {
+                    customView(custom)
                 } else {
                     choose
                 }
@@ -385,7 +393,87 @@ struct StrictStartSheet: View {
                 }
             }
             .padding(.top, 22)
+            VStack(spacing: 10) {
+                Button("長さで指定…") {
+                    customError = nil
+                    withAnimation(.easeOut(duration: 0.2)) { custom = .length }
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                Button("時刻で指定…") {
+                    customError = nil
+                    pickTime = Self.nextQuarter(Date().addingTimeInterval(3600))
+                    withAnimation(.easeOut(duration: 0.2)) { custom = .time }
+                }
+                .buttonStyle(SecondaryButtonStyle())
+            }
+            .padding(.top, 10)
             Button("やめる") { dismiss() }
+                .buttonStyle(PlainWoodButtonStyle())
+                .padding(.top, 10)
+        }
+    }
+
+    /// 次の15分の区切り（ちょうどならそのまま）
+    private static func nextQuarter(_ d: Date) -> Date {
+        let step = Double(StrictLock.customStep * 60)
+        return Date(timeIntervalSinceReferenceDate: (d.timeIntervalSinceReferenceDate / step).rounded(.up) * step)
+    }
+
+    /// 選んだ時刻 → いまからの分（切り上げ）。いま以前なら明日の同時刻
+    private static func minutesUntil(clock picked: Date, now: Date) -> Int {
+        let cal = Calendar.current
+        let c = cal.dateComponents([.hour, .minute], from: picked)
+        var target = cal.date(bySettingHour: c.hour ?? 0, minute: c.minute ?? 0, second: 0, of: now) ?? picked
+        if target <= now { target = cal.date(byAdding: .day, value: 1, to: target) ?? target }
+        return Int((target.timeIntervalSince(now) / 60).rounded(.up))
+    }
+
+    private func customView(_ mode: Custom) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SheetHeader(title: mode == .length ? "長さで指定" : "時刻で指定") { dismiss() }
+            TimelineView(.everyMinute) { ctx in
+                let m = mode == .length ? pickHours * 60 + pickMinutes
+                                        : Self.minutesUntil(clock: pickTime, now: ctx.date)
+                let ok = StrictLock.customMinutes.contains(m)
+                VStack(alignment: .leading, spacing: 0) {
+                    if mode == .length {
+                        HStack(spacing: 0) {
+                            Picker("時間", selection: $pickHours) {
+                                ForEach(0...24, id: \.self) { Text("\($0)時間").tag($0) }
+                            }
+                            .pickerStyle(.wheel)
+                            Picker("分", selection: $pickMinutes) {
+                                ForEach(Array(stride(from: 0, to: 60, by: StrictLock.customStep)), id: \.self) { Text("\($0)分").tag($0) }
+                            }
+                            .pickerStyle(.wheel)
+                        }
+                        .frame(height: 150)
+                        .onChange(of: pickHours) { _, h in if h == 24 { pickMinutes = 0 } }
+                    } else {
+                        QuarterTimePicker(date: $pickTime)
+                            .frame(height: 150)
+                    }
+                    Text(ok ? "\(StrictLock.clock(ctx.date.addingTimeInterval(TimeInterval(m * 60)), now: ctx.date)) まで（\(StrictLock.duration(m))）"
+                            : StrictLock.customRangeText)
+                        .font(.headline).monospacedDigit()
+                        .foregroundStyle(ok ? Theme.ink : Theme.danger)
+                        .padding(.top, 12)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let customError {
+                        Text(customError).font(.footnote).foregroundStyle(Theme.danger)
+                            .padding(.top, 6)
+                    }
+                    Button("この長さで進む") {
+                        guard ok else { customError = StrictLock.customRangeText; return }
+                        withAnimation(.easeOut(duration: 0.2)) { minutes = m }
+                    }
+                    .buttonStyle(PrimaryButtonStyle())
+                    .disabled(!ok)
+                    .padding(.top, 18)
+                }
+            }
+            .padding(.top, 12)
+            Button("戻る") { withAnimation(.easeOut(duration: 0.2)) { custom = nil } }
                 .buttonStyle(PlainWoodButtonStyle())
                 .padding(.top, 10)
         }
@@ -502,5 +590,30 @@ struct StrictStartSheet: View {
         }
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+
+/// 時刻だけのホイール（分は15分きざみ）
+struct QuarterTimePicker: UIViewRepresentable {
+    @Binding var date: Date
+    func makeUIView(context: Context) -> UIDatePicker {
+        let p = UIDatePicker()
+        p.datePickerMode = .time
+        p.preferredDatePickerStyle = .wheels
+        p.minuteInterval = StrictLock.customStep
+        p.locale = Locale(identifier: "ja_JP")
+        p.date = date
+        p.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .valueChanged)
+        return p
+    }
+    func updateUIView(_ p: UIDatePicker, context: Context) {
+        if p.date != date { p.date = date }
+    }
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    final class Coordinator: NSObject {
+        var parent: QuarterTimePicker
+        init(_ p: QuarterTimePicker) { parent = p }
+        @objc func changed(_ p: UIDatePicker) { parent.date = p.date }
     }
 }

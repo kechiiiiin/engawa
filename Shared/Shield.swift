@@ -190,7 +190,7 @@ enum Shield {
     static func startStrictLock(minutes: Int) -> String? {
         let now = Date()
         guard AuthorizationCenter.shared.authorizationStatus == .approved else { return "スクリーンタイムの許可がまだです。" }
-        guard StrictLock.minuteChoices.contains(minutes) else { return "時間を選んでください。" }
+        guard StrictLock.minuteChoices.contains(minutes) || StrictLock.customMinutes.contains(minutes) else { return "時間を選んでください。" }
         guard !StrictLock.isActive(now) else { return "すでにスーパーロック中です。" }
         guard KeepApps.registered.count <= KeepApps.limit else { return StrictLock.tooManyKeepApps }
         let until = now.addingTimeInterval(TimeInterval(minutes * 60))
@@ -219,7 +219,7 @@ enum Shield {
     static func startNormalLock(minutes: Int) -> String? {
         let now = Date()
         guard AuthorizationCenter.shared.authorizationStatus == .approved else { return "スクリーンタイムの許可がまだです。" }
-        guard StrictLock.minuteChoices.contains(minutes) else { return "時間を選んでください。" }
+        guard StrictLock.minuteChoices.contains(minutes) || StrictLock.customMinutes.contains(minutes) else { return "時間を選んでください。" }
         guard !NormalLock.isActive(now) else { return "すでにロック中です。" }
         // 残すアプリは空でもよい（縁側と標準アプリ以外が全部止まる・§9.10）
         let keep = NormalLock.keepApps
