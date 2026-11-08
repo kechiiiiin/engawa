@@ -49,8 +49,17 @@ enum Store {
         data(key).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
     }
 
-    static func setCodable<T: Encodable>(_ key: String, _ v: T?) {
-        setData(key, v.flatMap { try? JSONEncoder().encode($0) })
+    /// nil を渡したときだけファイルを消す。書き出せなかった（エンコードの失敗）ときは元のファイルに触らない
+    /// （「書けなかった」を「無い」にしない）。書けたら true
+    @discardableResult
+    static func setCodable<T: Encodable>(_ key: String, _ v: T?) -> Bool {
+        guard let v else { setData(key, nil); return true }
+        guard let d = try? JSONEncoder().encode(v) else {
+            Log.add(kind: "store", ok: false, error: "書き出せないので元のまま", detail: key)
+            return false
+        }
+        setData(key, d)
+        return true
     }
 }
 

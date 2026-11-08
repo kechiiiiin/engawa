@@ -53,17 +53,22 @@ enum Shield {
     }
 
     /// 通常ロック中の例外 = 残すアプリ（§9.10）と、スーパーロックで使うアプリの登録の確かめ中の候補（合わせて50個まで）。
+    /// 50個に収まらないときは、候補を必ず入れて、残すアプリの方を（効かせる例外の中だけ）減らす。残すアプリの一覧そのものは変えない。
+    /// 減らした残すアプリは確かめのあいだだけ止まる（止まる側に倒す）。候補を落とすと、その候補がカテゴリの止めにも掛かって
+    /// 登録できなくなるため。候補は確かめ用のストアで止まったままなので、例外に入れても使えるようにはならない。
     /// 候補を例外に入れるのは、候補を止めるのを確かめ用のストア（アプリ単位）だけにするため。既定のストアのカテゴリでも
     /// 止まっていると、ロック画面とボタンがアプリ版・カテゴリ版のどちらで呼ばれるか決まらず、登録できないおそれがある
     /// （推測・要実機）。候補は確かめ用のストアで止まったままなので、使えるようにはならない。
     /// 確かめが終われば次の reconcile で例外から外れ、通常ロックで止まる
     static func normalExceptions() -> Set<ApplicationToken> {
-        var apps = Array(NormalLock.keepApps.prefix(NormalLock.appLimit))
-        if KeepApps.isVerifying, let pending = KeepApps.store.shield.applications {
-            let kept = Set(apps)
-            apps += pending.filter { !kept.contains($0) }.prefix(max(0, NormalLock.appLimit - apps.count))
+        let keep = NormalLock.keepApps
+        guard KeepApps.isVerifying, let pending = KeepApps.store.shield.applications, !pending.isEmpty else {
+            return Set(keep.prefix(NormalLock.appLimit))
         }
-        return Set(apps)
+        // 候補は確かめを始めるときに50個までに抑えてある（AppModel.startKeepVerify）。念のためここでも上限で切る
+        let candidates = Set(pending.prefix(NormalLock.appLimit))
+        let rest = keep.subtracting(candidates)
+        return candidates.union(rest.prefix(max(0, NormalLock.appLimit - candidates.count)))
     }
 
     /// 縁側自身は `apps` に入れなくても止まらない: FamilyControls で認可されたアプリは ManagedSettings の

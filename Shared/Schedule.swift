@@ -210,7 +210,8 @@ enum Schedules {
     /// 保存して予定を登録し直す（本体から）。断るときは理由。iOS への登録に失敗したら保存を戻す
     static func save(_ s: LockSchedule) -> String? {
         if let r = s.invalidReason { return r }
-        let before = load() ?? []
+        // 読めないとき（壊れている・データ保護中）は変えない（空として書いて、全部を消してしまわない）
+        guard let before = load() else { return unreadableMessage }
         var list = before
         var item = s
         item.effectiveFrom = ISO.now   // 次の回から効く
@@ -234,12 +235,20 @@ enum Schedules {
         return nil
     }
 
-    /// 消す（本体から）。いま掛かっている回（確定済みの回）はそのまま（§9.9 の7）
-    static func delete(id: String) {
-        Store.setCodable(file, all.filter { $0.id != id })
-        let ok = !all.contains { $0.id == id }
+    static let unreadableMessage = "スケジュールを読み込めないため、変更できません。"
+
+    /// 消す（本体から）。いま掛かっている回（確定済みの回）はそのまま（§9.9 の7）。断るときは理由
+    static func delete(id: String) -> String? {
+        // 読めないとき（壊れている・データ保護中）は変えない（空として書いて、全部を消してしまわない）
+        guard let before = load() else {
+            Log.add(kind: "schedule", ok: false, error: "読めないので消さない", detail: "削除 \(id)")
+            return unreadableMessage
+        }
+        Store.setCodable(file, before.filter { $0.id != id })
+        let ok = load().map { !$0.contains { $0.id == id } } ?? false
         let e = syncMonitoring(route: "schedule")
         Log.add(kind: "schedule", ok: ok && e == nil, error: ok ? e : "削除を保存できなかった", detail: "削除 \(id)")
+        return ok ? nil : "スケジュールを消せませんでした。もう一度お試しください。"
     }
 
     // MARK: 確定済みの回（始まった回の中身を写したもの）

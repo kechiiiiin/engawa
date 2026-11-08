@@ -100,9 +100,11 @@ final class AppModel: ObservableObject {
         return e
     }
 
-    func deleteSchedule(id: String) {
-        Schedules.delete(id: id)
+    /// 消す。断るときは理由
+    func deleteSchedule(id: String) -> String? {
+        let e = Schedules.delete(id: id)
         refresh()
+        return e
     }
 
     // MARK: スーパーロックで使うアプリ（§9.8 B）
@@ -115,6 +117,11 @@ final class AppModel: ObservableObject {
             return candidates.categoryTokens.isEmpty && candidates.applicationTokens.isEmpty
                 ? nil
                 : "まだ追加していないアプリを、1つずつ選んでください（カテゴリでは選べません）。"
+        }
+        // 登録できるのは合わせて50個まで。候補もそれまでに抑える（通常ロック中に候補を必ず例外に入れられるように・Shield.normalExceptions）
+        let room = KeepApps.limit - KeepApps.registered.count
+        guard apps.count <= room else {
+            return room > 0 ? "追加できるのはあと\(room)個までです（合わせて\(KeepApps.limit)個まで）。" : "これ以上は追加できません（\(KeepApps.limit)個まで）。"
         }
         KeepApps.start(apps)
         // 通常ロック中は候補を通常ロックの例外に入れる（Shield.normalExceptions）

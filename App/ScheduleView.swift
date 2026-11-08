@@ -335,8 +335,7 @@ struct ScheduleEditSheet: View {
         .presentationCornerRadius(28)
         .confirmationDialog("このスケジュールを消しますか", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("消す", role: .destructive) {
-                model.deleteSchedule(id: original.id)
-                dismiss()
+                if let e = model.deleteSchedule(id: original.id) { error = e } else { dismiss() }
             }
             Button("やめる", role: .cancel) {}
         } message: {

@@ -44,10 +44,8 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
         super.intervalDidEnd(for: activity)
         wake("intervalDidEnd", activity)
         if Self.isSchedule(activity) {
-            // スケジュールの終わり。期限は終わりの目覚ましでも外れるが、ここでも決め直す（二重の網）
-            var hint = WakeHint()
-            if activity.rawValue.hasSuffix(".s") { hint.strictGrace = Self.slack } else { hint.normalGrace = Self.slack }
-            let st = Shield.reconcile(route: activity.rawValue, hint: hint)
+            // スケジュールの終わり。期限は終わりの目覚まし（.strictLockEnd・.normalLockEnd）でも外れるが、ここでも決め直す（二重の網）
+            let st = Shield.reconcile(route: activity.rawValue, hint: Self.endHint(for: activity, now: Date()))
             done(activity, st)
             return
         }
@@ -79,6 +77,30 @@ class DeviceActivityMonitorExtension: DeviceActivityMonitor {
     }
 
     static func isSchedule(_ a: DeviceActivityName) -> Bool { a.rawValue.hasPrefix(Schedules.prefix) }
+
+    /// スケジュールの終わり（sched.<id>.n／sched.<id>.s）で渡す余裕。余裕は「いまの期限」全体に効くので、
+    /// その期限がこのスケジュールの回の終わりそのもので、しかも slack のうちに来るときだけ渡す。
+    /// 手動のロックや別のスケジュールの回で期限がそれより先なら（例: 手動のスーパー 5:01 まで・スケジュール 23:00〜5:00）
+    /// 余裕 0 で決め直し、ちょうどの期限は .strictLockEnd／.normalLockEnd に任せる（別のロックを早く終わらせない）。
+    /// 期限が回の終わりと同じなら今までと同じ余裕なので、外れるのが今より遅くなることはない
+    static func endHint(for activity: DeviceActivityName, now: Date) -> WakeHint {
+        var hint = WakeHint()
+        let raw = activity.rawValue.dropFirst(Schedules.prefix.count)
+        guard let dot = raw.lastIndex(of: ".") else { return hint }
+        let id = String(raw[..<dot])
+        let kind: LockKind
+        switch raw[raw.index(after: dot)...] {
+        case Substring(LockKind.strict.activitySuffix): kind = .strict
+        case Substring(LockKind.normal.activitySuffix): kind = .normal
+        default: return hint
+        }
+        guard let until = kind == .strict ? Store.strictLockUntil : Store.normalLockUntil,
+              until <= now.addingTimeInterval(slack),
+              Schedules.runs.contains(where: { $0.scheduleID == id && $0.kind == kind && abs($0.end.timeIntervalSince(until)) < 1 })
+        else { return hint }
+        if kind == .strict { hint.strictGrace = slack } else { hint.normalGrace = slack }
+        return hint
+    }
 
     private func done(_ activity: DeviceActivityName, _ st: LockStatus) {
         Log.add(LogRecord(kind: activity.rawValue, route: activity.rawValue, locked: st.locked,
