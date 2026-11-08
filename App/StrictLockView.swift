@@ -418,11 +418,6 @@ struct StrictStartSheet: View {
                     row(title: "止まるもの", text: "使えるアプリと縁側以外のすべてのアプリ。電話・メッセージなど iOS に最初から入っているアプリは止まりません。ウェブサイトは止めません。")
                     Rectangle().fill(Theme.line).frame(height: 0.5)
                     row(title: "使えるアプリ", text: keep.isEmpty ? "追加していません。ロックのタブの「使えるアプリ」で、ロック中も追加できます。" : "\(keep.count)個")
-                    if !keep.isEmpty {
-                        ForEach(Array(keep.prefix(6)), id: \.self) { t in
-                            Label(t).foregroundStyle(Theme.ink).padding(.bottom, 8)
-                        }
-                    }
                 }
                 .padding(.horizontal, 16)
                 .paperCard(radius: 14)
@@ -472,11 +467,6 @@ struct StrictStartSheet: View {
                     row(title: "変えられなくなるもの", text: "この iPhone のアプリは、どれも削除できなくなります。日付と時刻も自動設定のままになります。")
                     Rectangle().fill(Theme.line).frame(height: 0.5)
                     row(title: "使えるアプリ", text: keep.isEmpty ? "追加していません。縁側は開けるので、残り時間はいつでも見られます。" : "\(keep.count)個")
-                    if !keep.isEmpty {
-                        ForEach(Array(keep.prefix(6)), id: \.self) { t in
-                            Label(t).foregroundStyle(Theme.ink).padding(.bottom, 8)
-                        }
-                    }
                 }
                 .padding(.horizontal, 16)
                 .paperCard(radius: 14)
